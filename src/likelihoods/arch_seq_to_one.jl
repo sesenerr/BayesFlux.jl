@@ -19,11 +19,14 @@ Assumes is a single output. Thus, the last layer must have output size one.
 - `prior_σ`: a prior distribution for the standard deviation
 
 """
+
 struct ArchSeqToOneNormal{T,F,D<:Distributions.Distribution} <: BNNLikelihood
     num_params_like::Int
     nc::NetConstructor{T,F}
+# TODO: rename the prior(μ) 
     prior_σ::D
 end
+
 function ArchSeqToOneNormal(nc::NetConstructor{T,F}, prior_σ::D) where {T,F,D<:Distributions.Distribution}
     return ArchSeqToOneNormal(1, nc, prior_σ)
 end
