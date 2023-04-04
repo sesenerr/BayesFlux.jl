@@ -16,6 +16,10 @@ export BNNLikelihood, posterior_predict
 export FeedforwardNormal, FeedforwardTDist
 export SeqToOneNormal, SeqToOneTDist
 
+#####Trial likelihoods
+include("./likelihoods/arch_seq_to_one.jl")
+export ArchSeqToOneNormal
+
 include("./netpriors/abstract.jl")
 include("./netpriors/gaussian.jl")
 include("./netpriors/mixturescale.jl")
