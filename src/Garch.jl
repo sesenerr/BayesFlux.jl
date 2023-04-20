@@ -46,78 +46,92 @@ function garchNDraws(n::Int, α::Float64, β::Float64, vol::Float64)
     return output
 end
 
+d = garchNDraws(100, 0.5, 0.0, vol)
+σ2 = d["sigma_squared"]
+ret = rand(MvNormal(zeros(101), diagm(σ2)))
+plot!(d["L"], color=:red)
+
 simulated_Garch = garchNDraws(n, α, β, vol)
 
 y = Float32.(simulated_Garch["L"])
+print("number of positive elements in y " ,length(y[y.>0]))
 
-y = y .^2
+# y = y .^2
+# print("number of positive elements in y " ,length(y[y.>0]))
+
 
 
 ####### New likelihood Trial
 
 net = Chain(RNN(1, 1,relu), Dense(1, 1, relu))  # last layer is linear output layer
-nc = destruct(net)
-like = ArchSeqToOneNormal(nc, Gamma(2.0, 0.5))
-prior = GaussianPrior(nc, 0.5f0)
-init = InitialiseAllSame(Normal(0.0f0, 0.5f0), like, prior)
+nc = Main.BayesFlux.destruct(net)
+# like = ArchSeqToOneNormal(nc, Gamma(2.0, 0.5))
+like = Main.BayesFlux.ArchSeqToOneNormal(nc, Normal(0.0, 0.1))
+prior = Main.BayesFlux.GaussianPrior(nc, 0.5f0)
+init = Main.BayesFlux.InitialiseAllSame(Normal(0.0f0, 0.5f0), like, prior)
 
 
-x = make_rnn_tensor(reshape(y, :, 1), 5 + 1)
+x = make_rnn_tensor(reshape(y, :, 1), 5 + 1) .* 100
 y = vec(x[end, :, :])
 x = x[1:end-1, :, :]
 
+print("number of positive elements in y " ,length(y[y.>0]))
 
 
-bnn = BNN(x, y, like, prior, init)
-opt = FluxModeFinder(bnn, Flux.RMSProp())
-θmap = find_mode(bnn, 10, 1000, opt)
+bnn = Main.BayesFlux.BNN(x, y, like, prior, init)
+opt = Main.BayesFlux.FluxModeFinder(bnn, Flux.Adam(1e-3))
+θmap = Main.BayesFlux.find_mode(bnn, 10, 1, opt)
 
 
 nethat = nc(θmap)
-yhat = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
+σ2hat = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
 sqrt(mean(abs2, y .- yhat))
 
 
 
 
-n_negative = count(x -> x < 0, y)
+plot(1:495 ,yhat , label = "estimation")
+plot!(1:495 ,y , label = "data")
 
 
 
-#### Default Recurrent estimation
+# #### Default Recurrent estimation
 
-Random.seed!(6150533)
-gamma = 0.8
-N = 500
-burnin = 1000
-y = zeros(N + burnin + 1)
-for t=2:(N+burnin+1)
-    y[t] = gamma*y[t-1] + randn()
-end
-y = Float32.(y[end-N+1:end])
+# Random.seed!(6150533)
+# gamma = 0.8
+# N = 500
+# burnin = 1000
+# y = zeros(N + burnin + 1)
+# for t=2:(N+burnin+1)
+#     y[t] = gamma*y[t-1] + randn()
+# end
+# y = Float32.(y[end-N+1:end])
 
+# print("number of positive elements in y " ,length(y[y.>0]))
 
-net = Chain(RNN(1, 1), Dense(1, 1))  # last layer is linear output layer
-nc = destruct(net)
-like = SeqToOneNormal(nc, Gamma(2.0, 0.5))
-prior = GaussianPrior(nc, 0.5f0)
-init = InitialiseAllSame(Normal(0.0f0, 0.5f0), like, prior)
-
-
-x = make_rnn_tensor(reshape(y, :, 1), 5 + 1)
-y = vec(x[end, :, :])
-x = x[1:end-1, :, :]
+# net = Chain(RNN(1, 1), Dense(1, 1))  # last layer is linear output layer
+# nc = destruct(net)
+# like = SeqToOneNormal(nc, Gamma(2.0, 0.5))
+# prior = GaussianPrior(nc, 0.5f0)
+# init = InitialiseAllSame(Normal(0.0f0, 0.5f0), like, prior)
 
 
+# x = make_rnn_tensor(reshape(y, :, 1), 5 + 1)
+# y = vec(x[end, :, :])
+# x = x[1:end-1, :, :]
 
-bnn = BNN(x, y, like, prior, init)
-opt = FluxModeFinder(bnn, Flux.RMSProp())
-θmap = find_mode(bnn, 10, 1000, opt)
+# print("number of positive elements in y " ,length(y[y.>0]))
 
 
-nethat = nc(θmap)
-yhat = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
-sqrt(mean(abs2, y .- yhat))
+# bnn = BNN(x, y, like, prior, init)
+# opt = FluxModeFinder(bnn, Flux.RMSProp())
+# θmap = find_mode(bnn, 10, 1000, opt)
+
+
+# nethat = nc(θmap)
+# yhat = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
+# sqrt(mean(abs2, y .- yhat))
+
 
 
 

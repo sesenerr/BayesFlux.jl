@@ -43,7 +43,7 @@ end
 #     # Usually results in faster gradients
 #     return logpdf(MvNormal(fill(θlike[1],n), diagm(σ)), (y)) - sum(log.(σ)) + logpdf(l.prior_σ, θlike[1])
 # end
-
+#?
 function (l::ArchSeqToOneNormal{T,F,D})(x::Array{T,3}, y::Vector{T}, θnet::AbstractVector, θlike::AbstractVector) where {T,F,D}
     θnet = T.(θnet)
     θlike = T.(θlike)

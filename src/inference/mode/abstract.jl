@@ -67,8 +67,14 @@ function find_mode(
         showspeed=true
     )
 
-    ∇θ(θ, x, y) = ∇loglikeprior(bnn, θ, x, y; num_batches=num_batches)
-
+    # ∇θ(θ, x, y) = ∇loglikeprior(bnn, θ, x, y; num_batches=num_batches)
+    function ∇θ(θ, x, y)
+        v, g = ∇loglikeprior(bnn, θ, x, y; num_batches=num_batches)
+        g = g ./ norm(g)
+        println(g)
+        return v, g
+    end
+    println("######## Hello world!!!!!")
     for e = 1:epochs
         for (x, y) in batcher
             θ, has_converged = step!(optimiser, θ, θ -> ∇θ(θ, x, y))
