@@ -42,20 +42,21 @@ function garchNDraws(n::Int, α::Float64, β::Float64, vol::Float64)
     σ_2[n+1] = ω + α * L[n]^2 + β * σ_2[n]
 
     # Return output
-    output = Dict("L" => L, "sigma_squared" => σ_2, "nextSigma" => σ_2[n+1])
+    output = Dict("L" => L, "sigma_squared" => σ_2[1:n], "nextSigma" => σ_2[n+1])
     return output
 end
 
 simulated_Garch = garchNDraws(n, α, β, vol)
 
 y = Float32.(simulated_Garch["L"])
+simulated_σ = sqrt.(Float32.(simulated_Garch["sigma_squared"]))
 
 #y = y .^2
 
 
 ####### New likelihood Trial
 
-net = Chain(RNN(1, 1), Dense(1, 1))  # last layer is linear output layer
+net = Chain(RNN(1, 10), Dense(10, 1))  # last layer is linear output layer
 nc = destruct(net)
 like = ArchSeqToOneNormal(nc, Normal(0, 0.5))
 prior = GaussianPrior(nc, 0.5f0)
@@ -70,19 +71,27 @@ x = x[1:end-1, :, :]
 
 bnn = BNN(x, y, like, prior, init)
 opt = FluxModeFinder(bnn, Flux.RMSProp())
-θmap = find_mode(bnn, 10, 1000, opt)
+θmap = find_mode(bnn, 10, 10000, opt)
 
 
 nethat = nc(θmap)
-yhat = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
-log_σ = exp.(yhat)
+log_σ  = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
+σ_hat = exp.(log_σ)
 sqrt(mean(abs2, y .- yhat))
 
 
+# plot the actual and estimated series
+plot(1:length(σ_hat), simulated_σ[6:500], label="Actual")
+plot!(1:length(σ_hat),σ_hat, label="Estimated")
+
+# add labels and legend
+xlabel!("X")
+ylabel!("Y")
+title!("Actual vs. Estimated Series")
+legend!(title="Series", loc="topright")
 
 
-
-
+print("kkk")
 
 
 # #### Default Recurrent estimation
