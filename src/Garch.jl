@@ -50,7 +50,7 @@ simulated_Garch = garchNDraws(n, α, β, vol)
 
 y = Float32.(simulated_Garch["L"])
 
-y = y .^2
+#y = y .^2
 
 
 ####### New likelihood Trial
