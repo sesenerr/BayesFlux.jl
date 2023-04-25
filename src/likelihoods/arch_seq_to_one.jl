@@ -49,9 +49,9 @@ function (l::ArchSeqToOneNormal{T,F,D})(x::Array{T,3}, y::Vector{T}, θnet::Abst
     θlike = T.(θlike)
 
     net = l.nc(θnet)
-    σ_2hat = vec([net(xx) for xx in eachslice(x; dims=1)][end])
+    log_σ = vec([net(xx) for xx in eachslice(x; dims=1)][end])
     n = length(y)
-    σ = sqrt.(σ_2hat)
+    σ = exp.(log_σ)
     σ = T.(σ)
     # Using reparameterised likelihood 
     # Usually results in faster gradients

@@ -55,51 +55,9 @@ y = Float32.(simulated_Garch["L"])
 
 ####### New likelihood Trial
 
-net = Chain(RNN(1, 1,relu), Dense(1, 1, relu))  # last layer is linear output layer
-nc = destruct(net)
-like = ArchSeqToOneNormal(nc, Gamma(2.0, 0.5))
-prior = GaussianPrior(nc, 0.5f0)
-init = InitialiseAllSame(Normal(0.0f0, 0.5f0), like, prior)
-
-
-x = make_rnn_tensor(reshape(y, :, 1), 5 + 1)
-y = vec(x[end, :, :])
-x = x[1:end-1, :, :]
-
-
-
-bnn = BNN(x, y, like, prior, init)
-opt = FluxModeFinder(bnn, Flux.RMSProp())
-θmap = find_mode(bnn, 10, 1000, opt)
-
-
-nethat = nc(θmap)
-yhat = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
-sqrt(mean(abs2, y .- yhat))
-
-
-
-
-n_negative = count(x -> x < 0, y)
-
-
-
-#### Default Recurrent estimation
-
-Random.seed!(6150533)
-gamma = 0.8
-N = 500
-burnin = 1000
-y = zeros(N + burnin + 1)
-for t=2:(N+burnin+1)
-    y[t] = gamma*y[t-1] + randn()
-end
-y = Float32.(y[end-N+1:end])
-
-
 net = Chain(RNN(1, 1), Dense(1, 1))  # last layer is linear output layer
 nc = destruct(net)
-like = SeqToOneNormal(nc, Gamma(2.0, 0.5))
+like = ArchSeqToOneNormal(nc, Normal(0, 0.5))
 prior = GaussianPrior(nc, 0.5f0)
 init = InitialiseAllSame(Normal(0.0f0, 0.5f0), like, prior)
 
@@ -117,7 +75,50 @@ opt = FluxModeFinder(bnn, Flux.RMSProp())
 
 nethat = nc(θmap)
 yhat = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
+log_σ = exp.(yhat)
 sqrt(mean(abs2, y .- yhat))
+
+
+
+
+
+
+
+
+# #### Default Recurrent estimation
+
+# Random.seed!(6150533)
+# gamma = 0.8
+# N = 500
+# burnin = 1000
+# y = zeros(N + burnin + 1)
+# for t=2:(N+burnin+1)
+#     y[t] = gamma*y[t-1] + randn()
+# end
+# y = Float32.(y[end-N+1:end])
+
+
+# net = Chain(RNN(1, 1), Dense(1, 1))  # last layer is linear output layer
+# nc = destruct(net)
+# like = SeqToOneNormal(nc, Gamma(2.0, 0.5))
+# prior = GaussianPrior(nc, 0.5f0)
+# init = InitialiseAllSame(Normal(0.0f0, 0.5f0), like, prior)
+
+
+# x = make_rnn_tensor(reshape(y, :, 1), 5 + 1)
+# y = vec(x[end, :, :])
+# x = x[1:end-1, :, :]
+
+
+
+# bnn = BNN(x, y, like, prior, init)
+# opt = FluxModeFinder(bnn, Flux.RMSProp())
+# θmap = find_mode(bnn, 10, 1000, opt)
+
+
+# nethat = nc(θmap)
+# yhat = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
+# sqrt(mean(abs2, y .- yhat))
 
 
 
