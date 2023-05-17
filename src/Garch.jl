@@ -18,7 +18,7 @@ vol = (20^2)/252 #Implying a volatility of 20% per year
 #p = 0.01
 # GARCH parameters
 α = 0.5
-β = 0.0
+β = 0.3
 
 
 
@@ -56,7 +56,7 @@ simulated_σ = sqrt.(Float32.(simulated_Garch["sigma_squared"]))
 
 ####### New likelihood Trial
 
-net = Chain(RNN(1, 10), Dense(10, 1))  # last layer is linear output layer
+net = Chain(LSTM(1, 2), Dense(2, 1))  # last layer is linear output layer
 nc = destruct(net)
 like = ArchSeqToOneNormal(nc, Normal(0, 0.5))
 prior = GaussianPrior(nc, 0.5f0)
@@ -77,7 +77,8 @@ opt = FluxModeFinder(bnn, Flux.RMSProp())
 nethat = nc(θmap)
 log_σ  = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
 σ_hat = exp.(log_σ)
-sqrt(mean(abs2, y .- yhat))
+sqrt(mean(abs2, simulated_σ[6:n] .- σ_hat))
+
 
 
 # plot the actual and estimated series
@@ -85,13 +86,89 @@ plot(1:length(σ_hat), simulated_σ[6:500], label="Actual")
 plot!(1:length(σ_hat),σ_hat, label="Estimated")
 
 # add labels and legend
-xlabel!("X")
-ylabel!("Y")
+xlabel!("Time")
+ylabel!("Std.")
 title!("Actual vs. Estimated Series")
-legend!(title="Series", loc="topright")
+
+var = θmap[end] .+ (σ_hat .* 1.645)
+var = Float32.(var)
+es = θmap[end] .+ (σ_hat .* 2.062713)
+es =Float32.(es)
+y
+
+# Compare element-wise
+comparison_var = y .> var
+# Count how many times elements in x are greater than those in y
+count_bigger_var = sum(comparison_var)
+persantage = count_bigger_var/ length(y)
 
 
-print("kkk")
+###Samplerss##
+sampler = AdaptiveMH(diagm(ones(Float32, bnn.num_total_params)), 1000, 0.5f0, 1f-4)
+
+sadapter = DualAveragingStepSize(1f-9; target_accept = 0.55f0, adapt_steps = 10000)
+madapter = DiagCovMassAdapter(5000, 1000)
+sampler = HMC(1f-9, 5; sadapter = sadapter)
+
+sadapter = DualAveragingStepSize(1f-9; target_accept = 0.55f0, adapt_steps = 10000)
+sampler = GGMC(Float32; β = 0.1f0, l = 1f-9, sadapter = sadapter)
+
+sampler = SGLD(Float32; stepsize_a = 10f-2, stepsize_b = 0.01f0, stepsize_γ = 0.55f0)
+sampler = SGNHTS(1f-2, 1f0; xi = 1f0^1, μ = 1f0)
+
+
+ch = mcmc(bnn, 10, 50_000, sampler)
+ch = ch[:, end-20_000+1:end]
+chain = Chains(ch')
+
+
+
+function naive_prediction_recurrent(bnn, draws::Array{T, 2}; x = bnn.x, y = bnn.y) where {T}
+    yhats = Array{T, 2}(undef, length(y), size(draws, 2))
+    Threads.@threads for i=1:size(draws, 2)
+        net = bnn.like.nc(draws[:, i])
+        yh = vec([net(xx) for xx in eachslice(x; dims = 1)][end])
+        yhats[:,i] = yh
+    end
+    return yhats
+end
+
+function get_observed_quantiles(y, posterior_yhat, target_q = 0.05:0.05:0.95)
+    qs = [quantile(yr, target_q) for yr in eachrow(posterior_yhat)]
+    qs = reduce(hcat, qs)
+    observed_q = mean(reshape(y, 1, :) .< qs; dims = 2)
+    return observed_q
+end
+
+
+log_σhats = naive_prediction_recurrent(bnn, ch)
+σhats = exp.(log_σhats)
+chain_σhat = Chains(σhats')
+maximum(summarystats(chain_σhat)[:, :rhat])
+
+posterior_log_σhat = sample_posterior_predict(bnn, ch)
+posterior_σhat = exp.(posterior_log_σhat)
+t_q = 0.05:0.05:0.95
+o_q = get_observed_quantiles(simulated_σ[6:500], posterior_σhat, t_q)
+plot(t_q, o_q, label = "Posterior Predictive", legend=:topleft,
+    xlab = "Target Quantile", ylab = "Observed Quantile")
+plot!(x->x, t_q, label = "Target")
+
+
+
+##Variation Inference
+
+q, params, losses = bbb(bnn, 10, 2_000; mc_samples = 1, opt = Flux.ADAM(), n_samples_convergence = 10)
+ch = rand(q, 20_000)
+posterior_log_σhat = sample_posterior_predict(bnn, ch)
+posterior_σhat = exp.(posterior_log_σhat)
+t_q = 0.05:0.05:0.95
+o_q = get_observed_quantiles(simulated_σ[6:500], posterior_σhat, t_q)
+plot(t_q, o_q, label = "Posterior Predictive", legend=:topleft,
+    xlab = "Target Quantile", ylab = "Observed Quantile")
+plot!(x->x, t_q, label = "Target")
+
+
 
 
 # #### Default Recurrent estimation
@@ -129,5 +206,70 @@ print("kkk")
 # yhat = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
 # sqrt(mean(abs2, y .- yhat))
 
+ch
+
+chain
+
+size(ch, 2)
 
 
+# Define a matrix of arrays
+A = [randn(5) for i in 1:3]
+A
+# Concatenate the arrays horizontally using reduce and hcat
+B = reduce(hcat, A)
+
+# Print the original matrix and the concatenated matrix
+println("A: ", A)
+println("B: ", B)
+
+qs = [quantile(yr, t_q) for yr in eachrow(posterior_yhat)]
+qs = reduce(hcat, qs)
+
+o_q
+
+
+nereden baslasam -flarsiz entellik-
+yan masa 
+huberman lab -work efficeny-xsw2
+
+
+
+
+
+
+####### Assuming we have a function posterior_density(θ) that returns the posterior 
+#density p(θ|y) for a given value of θ, we can calculate 
+#the predictive distribution p(z|y) for a specific value of z as follows:
+
+function predictive_distribution(posterior_density, z, sampling_distribution, lower_bound, upper_bound)
+    integrand(θ) = pdf(sampling_distribution(θ), z) * posterior_density(θ)
+    p_z_given_y, _ = quadgk(integrand, lower_bound, upper_bound)
+    return p_z_given_y
+end
+
+
+#Here, sampling_distribution is a function that takes θ as input and returns the appropriate 
+#distribution for p(z|θ). lower_bound and upper_bound are the limits of integration for the
+# numerical integration. You may need to adjust them depending on the range of θ in your 
+#problem.
+
+function posterior_density(θ)
+    # Replace this with your actual posterior density function
+    return pdf(Normal(0, 1), θ)
+end
+
+sampling_distribution(θ) = Normal(θ, 1)
+
+#To compute the predictive distribution p(z|y) for a specific value of z,
+# call the predictive_distribution function:
+
+z = 1.5
+lower_bound = -10
+upper_bound = 10
+
+p_z_given_y = predictive_distribution(posterior_density, z, sampling_distribution, lower_bound, upper_bound)
+
+#Now p_z_given_y contains the predictive distribution value p(z|y) for the given value of z.
+# Adjust the posterior_density function, the sampling distribution, and the limits of 
+#integration according to your problem.
