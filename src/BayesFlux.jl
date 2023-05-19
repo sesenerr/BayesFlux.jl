@@ -19,6 +19,7 @@ export SeqToOneNormal, SeqToOneTDist
 #####Trial likelihoods
 include("./likelihoods/arch_seq_to_one.jl")
 export ArchSeqToOneNormal
+export ArchSeqToOneTDist
 
 include("./netpriors/abstract.jl")
 include("./netpriors/gaussian.jl")

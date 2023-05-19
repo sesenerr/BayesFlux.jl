@@ -31,18 +31,6 @@ function ArchSeqToOneNormal(nc::NetConstructor{T,F}, prior_μ::D) where {T,F,D<:
     return ArchSeqToOneNormal(1, nc, prior_μ)
 end
 
-# function (l::ArchSeqToOneNormal{T,F,D})(x::Array{T,3}, y::Vector{T}, θnet::AbstractVector, θlike::AbstractVector) where {T,F,D}
-#     θnet = T.(θnet)
-#     θlike = T.(θlike)
-
-#     net = l.nc(θnet)
-#     σ_2hat = vec([net(xx) for xx in eachslice(x; dims=1)][end])
-#     n = length(y)
-#     σ = sqrt.(σ_2hat)
-#     # Using reparameterised likelihood 
-#     # Usually results in faster gradients
-#     return logpdf(MvNormal(fill(θlike[1],n), diagm(σ)), (y)) - sum(log.(σ)) + logpdf(l.prior_μ, θlike[1])
-# end
 
 function (l::ArchSeqToOneNormal{T,F,D})(x::Array{T,3}, y::Vector{T}, θnet::AbstractVector, θlike::AbstractVector) where {T,F,D}
     θnet = T.(θnet)
@@ -97,19 +85,18 @@ struct ArchSeqToOneTDist{T,F,D<:Distributions.Distribution} <: BNNLikelihood
     prior_μ::D
     ν::T
 end
-function SeqToOneTDist(nc::NetConstructor{T,F}, prior_μ::D, ν::T) where {T,F,D}
-    return SeqToOneTDist(1, nc, prior_μ, ν)
+function ArchSeqToOneTDist(nc::NetConstructor{T,F}, prior_μ::D, ν::T) where {T,F,D}
+    return ArchSeqToOneTDist(1, nc, prior_μ, ν)
 end
 
-function (l::SeqToOneTDist{T,F,D})(x::Array{T,3}, y::Vector{T}, θnet::AbstractVector, θlike::AbstractVector) where {T,F,D}
+function (l::ArchSeqToOneTDist{T,F,D})(x::Array{T,3}, y::Vector{T}, θnet::AbstractVector, θlike::AbstractVector) where {T,F,D}
     θnet = T.(θnet)
     θlike = T.(θlike)
 
     net = l.nc(θnet)
     log_σ = vec([net(xx) for xx in eachslice(x; dims=1)][end])
-    tdist = transformed(l.prior_μ)
-    sigma = invlink(l.prior_μ, θlike[1])
-    n = length(y)
+    σ = exp.(log_σ)
+    σ = T.(σ)
 
     return sum(logpdf.(TDist(l.ν), (y .- θlike[1]) ./ σ)) - sum(log.(σ)) + logpdf(l.prior_μ, θlike[1])
 end

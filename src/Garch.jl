@@ -9,7 +9,7 @@ Random.seed!(1212)
 # Number of simulations
 #nr.sim = 100
 # Sample size
-n = 500
+n = 20
 # Volatility
 vol = (20^2)/252 #Implying a volatility of 20% per year
 # Degrees of freedom
@@ -56,17 +56,18 @@ simulated_σ = sqrt.(Float32.(simulated_Garch["sigma_squared"]))
 
 ####### New likelihood Trial
 
-net = Chain(LSTM(1, 2), Dense(2, 1))  # last layer is linear output layer
+
+net = Chain(RNN(1, 2), Dense(2, 1))  # last layer is linear output layer
 nc = destruct(net)
 like = ArchSeqToOneNormal(nc, Normal(0, 0.5))
 prior = GaussianPrior(nc, 0.5f0)
 init = InitialiseAllSame(Normal(0.0f0, 0.5f0), like, prior)
 
 
+
 x = make_rnn_tensor(reshape(y, :, 1), 5 + 1)
 y = vec(x[end, :, :])
 x = x[1:end-1, :, :]
-
 
 
 bnn = BNN(x, y, like, prior, init)
