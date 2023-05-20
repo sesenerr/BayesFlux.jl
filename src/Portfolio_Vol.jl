@@ -89,21 +89,22 @@ for i in 1:(length(test_index))
     push!(log_σ_test, log_σ_whole[end])
 end
 σ_hat_test = exp.(log_σ_test)
-
+log_σ_test
 # #one step ahead estimation
 # x_test = reshape(x_[end-4:end, end, :], :, 1)  # last 5 points in training set
 # log_σ = nethat(x_test)
 # σ_hat = exp.(log_σ)
 
 
-var = θmap[end] .+ (σ_hat .* 1.645)
-var = Float32.(var)
+var_train = θmap[end] .- (σ_hat .* 1.645)
+var_train = Float32.(var_train)
+
 
 # Compare element-wise
-comparison_var = y_train .> var
+comparison_var = y_train .< var_train
 # Count how many times elements in x are greater than those in y
 count_bigger_var = sum(comparison_var)
-persantage = count_bigger_var/ length(y)
+persantage = count_bigger_var/ length(y_train)
 
 #Train set plot
 plot(1:length(y_train), y_train, label="Actual")
@@ -130,15 +131,15 @@ var_test = Float32.(var_test)
 comparison_var_test = y_test .< var_test
 # Count how many times elements in x are greater than those in y
 count_bigger_var_test = sum(comparison_var_test)
-persantage_test = count_bigger_var_test/ length(y_train)
+persantage_test = count_bigger_var_test/ length(y_test)
 
 #Train set plot
 plot(1:length(y_test), y_test, label="Actual")
 plot!(1:length(y_test),σ_hat_test, label="Estimated")
 
 
-
-
+VaRLR(y_test,var_test,Float32[0.05])
+VaRLR(y_train,var_train,Float32[0.05,0.01])
 
 
 
@@ -165,6 +166,7 @@ plot!(1:length(y_test),σ_hat_test, label="Estimated")
 # @save "θmap_full_data_LSTM(1, 2), Dense(2, 1).jld2" θmap 
 # @load "θmap_full_data_LSTM(1, 2), Dense(2, 1).jld2" θmap
 # θmap
+
 
 
 
