@@ -36,6 +36,14 @@ bnn = BNN(x, y, like, prior, init)
 opt = FluxModeFinder(bnn, Flux.RMSProp())
 θmap = find_mode(bnn, 10, 1000, opt)
 
+nethat = nc(θmap)
+
+log_σ  = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
+σ_hat = exp.(log_σ)
+
+plot(1:length(σ_hat), y, label="Actual")
+plot!(1:length(σ_hat),σ_hat, label="Estimated")
+
 sampler = SGNHTS(1f-2, 1f0; xi = 1f0^1, μ = 1f0)
 
 ch = mcmc(bnn, 10, 50_000, sampler)

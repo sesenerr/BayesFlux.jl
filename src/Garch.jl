@@ -9,7 +9,7 @@ Random.seed!(1212)
 # Number of simulations
 #nr.sim = 100
 # Sample size
-n = 20
+n = 500
 # Volatility
 vol = (20^2)/252 #Implying a volatility of 20% per year
 # Degrees of freedom
@@ -26,7 +26,8 @@ vol = (20^2)/252 #Implying a volatility of 20% per year
 #"Function to Simulate GARCH process."
 function garchNDraws(n::Int, α::Float64, β::Float64, vol::Float64)
     ω = vol*(1-α-β)
-    ϵ = randn(Float64, n)
+    d = TDist(10)  # Create a t-distribution with 10 degrees of freedom
+    ϵ = rand(d,n)
     L = similar(ϵ)
     L[1] = sqrt(vol) * ϵ[1]
     σ_2 = zeros(n+1)
@@ -57,9 +58,9 @@ simulated_σ = sqrt.(Float32.(simulated_Garch["sigma_squared"]))
 ####### New likelihood Trial
 
 
-net = Chain(RNN(1, 2), Dense(2, 1))  # last layer is linear output layer
+net = Chain(LSTM(1, 2), Dense(2, 1))  # last layer is linear output layer
 nc = destruct(net)
-like = ArchSeqToOneNormal(nc, Normal(0, 0.5))
+like = ArchSeqToOneTDist(nc, Normal(0, 0.5),Float32(10))
 prior = GaussianPrior(nc, 0.5f0)
 init = InitialiseAllSame(Normal(0.0f0, 0.5f0), like, prior)
 
@@ -74,13 +75,21 @@ bnn = BNN(x, y, like, prior, init)
 opt = FluxModeFinder(bnn, Flux.RMSProp())
 θmap = find_mode(bnn, 10, 10000, opt)
 
-
 nethat = nc(θmap)
 log_σ  = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
 σ_hat = exp.(log_σ)
 sqrt(mean(abs2, simulated_σ[6:n] .- σ_hat))
 
+log_σ
+yy = reshape(y[1:500],1,500)
+kkk= vec(nethat(yy))
+kkk
+##
+##
+last_sequence = x[end, 1:end, :]  # Taking the last sequence from your training data
 
+k = nethat(last_sequence)[end]
+k[end]
 
 # plot the actual and estimated series
 plot(1:length(σ_hat), simulated_σ[6:500], label="Actual")
@@ -274,3 +283,7 @@ p_z_given_y = predictive_distribution(posterior_density, z, sampling_distributio
 #Now p_z_given_y contains the predictive distribution value p(z|y) for the given value of z.
 # Adjust the posterior_density function, the sampling distribution, and the limits of 
 #integration according to your problem.
+
+
+
+
