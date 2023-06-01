@@ -3,6 +3,28 @@ using CSV
 using DataFrames
 using Statistics
 using Flux
+using ExcelFiles,Plots
+using XLSX
+
+#network structures
+network_structures = [
+    Flux.Chain(RNN(2, 2), Dense(2, 1)), 
+    Flux.Chain(RNN(2, 4), Dense(4, 1)), 
+    Flux.Chain(RNN(2, 6), Dense(6, 1)), 
+    Flux.Chain(RNN(2, 10), Dense(10, 1)),
+    Flux.Chain(RNN(2, 2), Dense(2, 2, sigmoid), Dense(2, 1)), 
+    Flux.Chain(RNN(2, 6), Dense(6, 6, sigmoid), Dense(6, 1)), 
+    Flux.Chain(RNN(2, 2), Dense(2, 2, relu), Dense(2, 1)), 
+    Flux.Chain(RNN(2, 6), Dense(6, 6, relu), Dense(6, 1)), 
+    Flux.Chain(LSTM(2, 2), Dense(2, 1)), 
+    Flux.Chain(LSTM(2, 4), Dense(4, 1)), 
+    Flux.Chain(LSTM(2, 6), Dense(6, 1)), 
+    Flux.Chain(LSTM(2, 10), Dense(10, 1)), 
+    Flux.Chain(LSTM(2, 2), Dense(2, 2, sigmoid), Dense(2, 1)), 
+    Flux.Chain(LSTM(2, 6), Dense(6, 6, sigmoid), Dense(6, 1)), 
+    Flux.Chain(LSTM(2, 5), Dense(5, 5, relu), Dense(5, 1)), 
+    Flux.Chain(LSTM(2, 10), Dense(10, 10, relu), Dense(10, 1)), 
+]
 
 # Load data
 function load_data(file_path)
@@ -16,6 +38,7 @@ function load_data(file_path)
 end
 
 # Preprocess data
+#Scaling the input data 
 function preprocess_data(data, train_index, test_index)
     matrix_data = Matrix(data)
     matrix_data = Matrix{Float32}(matrix_data[:,2:3])
@@ -72,7 +95,7 @@ function get_bnn_data(net::Flux.Chain{T},X_train, y_train, degrees_f) where {T}
 end
 
 # Calculate MAP Estimation
-function calculate_map_estimation(bnn, X_train)
+function calculate_map_estimation(bnn, X_train,quant)
     opt = FluxModeFinder(bnn, Flux.RMSProp())
     θmap = find_mode(bnn, 10, 10000, opt)
     nethat = bnn.like.nc(θmap)
@@ -96,80 +119,162 @@ function update_dataframe(df, df_train_index, df_test_index, σ_hat, σ_hat_test
     return df
 end
 
+#convert dictionary to DataFrame 
+function convert_dict_to_df(dict)
+    df = DataFrame(quantile = Float64[], 
+                   PF = Float64[], 
+                   TUFF = Int[],
+                   LRTUFF = Float64[],
+                   LRUC = Float64[],
+                   LRIND = Float64[],
+                   LRCC = Float64[],
+                   BASEL = Int[])
+
+    for (k, v) in dict
+        push!(df, (Float64(k), Float64(v.PF), v.TUFF, Float64(v.LRTUFF), Float64(v.LRUC), Float64(v.LRIND), Float64(v.LRCC), v.BASEL))
+    end
+    return df
+end
 
 
+function get_bnn(net::Flux.Chain{T},x, y,df) where {T}
+    #net = Chain(LSTM(2, 6), Dense(6, 1))  # last layer is linear output layer
+    nc = destruct(net)
+    like = ArchSeqToOneTDist(nc, Normal(0, 1.5),df)
+    prior = GaussianPrior(nc, 1.5f0)
+    init = InitialiseAllSame(Normal(0.0f0, 2.0f0), like, prior)
+    bnn = BNN(x, y, like, prior, init)
+    return bnn
+end
 
-net = Chain(RNN(2, 6), Dense(6, 1))
-train_index = 600:1000
-test_index = 1001:1100
-degrees_f = Float32(5)  # Degrees of freedom, replace ... with the actual value.
-quantiles = Float32.([0.01,0.05,0.1])   # The value to find the quantile for, replace ... with the actual value.
-initial_investment = 100000.0
+function backtest_and_save_to_excel(
+    net::Flux.Chain{T},
+    train_index::UnitRange{Int},
+    test_index::UnitRange{Int},
+    degrees_f::Float32,
+    quantiles::Vector{Float32},
+    initial_investment::Float64,
+    unit::Int
+) where {T}
+    
+    # Specify the directory you want to create
+    new_dir = "$net"
 
-# Call Main Function
-#main(net,train_index, test_index, degrees_f, quantiles, initial_investment)
-
-# Main function experimental
-#function main()
-df = load_data("src/data/SPY_data.csv")
-X_train, y_train, X_test, y_test, X_full, y_full, df, df_train_index, df_test_index = preprocess_data(df, train_index, test_index)
-quant = calculate_quantile(degrees_f, quantiles)
-bnn = get_bnn_data(net,X_train, y_train, degrees_f)
-θmap, σ_hat, VaRs_MAP = calculate_map_estimation(bnn, X_train)
-σ_hat_test, VaRs_test_MAP = calculate_test_map_estimation(bnn, train_index, test_index, θmap, X_full)
-
-df = update_dataframe(df, df_train_index, df_test_index, σ_hat, σ_hat_test)
-
-#Training-set plot
-plot(1:length(y_train), y_train, label="Actual")
-plot!(1:length(y_train),σ_hat, label="Estimated")
-
-### MAP
-#train
-VaRLR(y_train,VaRs_MAP,quantiles)
-#test
-VaRLR(y_test,VaRs_test_MAP,quantiles)
-
-#Test-set plot
-plot(1:length(y_test), y_test, label="Actual")
-plot!(1:length(y_test),σ_hat_test, label="Estimated")
-
-#set how many units to buy 
-unit = 50
-history_directional = backtest_strategy(df[df_train_index,:], initial_investment, directional_strategy, :MAP, unit)
-history_mean = backtest_strategy(df[df_train_index,:], initial_investment, mean_reversion_strategy, :MAP,unit)
-history_hold = backtest_strategy(df[df_train_index,:], initial_investment, hold_strategy, :MAP)
-
-history_directional = backtest_strategy(df[df_test_index,:], initial_investment, directional_strategy, :MAP,unit)
-history_mean = backtest_strategy(df[df_test_index,:], initial_investment, mean_reversion_strategy, :MAP,unit)
-history_hold = backtest_strategy(df[df_test_index,:], initial_investment, hold_strategy, :MAP)
-
-#end
-
-
-
-
-
-# Main function on progress
-function main(
-    net ::String,
-    train_index::UnitRange{Int64}, 
-    test_index::UnitRange{Int64}, 
-    degrees_f::Float32, 
-    quantiles::Vector{Float32}, 
-    initial_investment::Float64
-)
+    # Create the directory
+    if !isdir(new_dir)
+    mkdir(new_dir)
+    end
+    
+    # ...existing code...
     df = load_data("src/data/SPY_data.csv")
     X_train, y_train, X_test, y_test, X_full, y_full, df, df_train_index, df_test_index = preprocess_data(df, train_index, test_index)
     quant = calculate_quantile(degrees_f, quantiles)
     bnn = get_bnn_data(net,X_train, y_train, degrees_f)
-    θmap, σ_hat, VaRs_MAP = calculate_map_estimation(bnn, X_train)
+    θmap, σ_hat, VaRs_MAP = calculate_map_estimation(bnn, X_train,quant)
     σ_hat_test, VaRs_test_MAP = calculate_test_map_estimation(bnn, train_index, test_index, θmap, X_full)
+ 
     df = update_dataframe(df, df_train_index, df_test_index, σ_hat, σ_hat_test)
-    final_value_directional = calculate_portfolio_direction(df, df_test_index, initial_investment, directional_strategy, "MAP")
-    final_value_mean_reversion = calculate_portfolio_mean_reversion(df, df_test_index, initial_investment, mean_reversion_strategy, "MAP")
+        
+    ### MAP
+    #train
+    Var_train = VaRLR(y_train,VaRs_MAP,quantiles)
+    #test
+    Var_test = VaRLR(y_test,VaRs_test_MAP,quantiles)
+    
+    #set how many units to buy 
+    history_directional = backtest_strategy(df[df_train_index,:], initial_investment, directional_strategy, :MAP, unit)
+    history_mean = backtest_strategy(df[df_train_index,:], initial_investment, mean_reversion_strategy, :MAP,unit)
+    history_hold = backtest_strategy(df[df_train_index,:], initial_investment, hold_strategy, :MAP,1)
+    
+    history_directional_test = backtest_strategy(df[df_test_index,:], initial_investment, directional_strategy, :MAP,unit)
+    history_mean_test = backtest_strategy(df[df_test_index,:], initial_investment, mean_reversion_strategy, :MAP,unit)
+    history_hold_test = backtest_strategy(df[df_test_index,:], initial_investment, hold_strategy, :MAP,1)
+    
+    # ...existing code...
+    
+    # Define model parameters
+    parameters = Dict(
+        "net" => string(net),  # Convert net to a string to store it
+        "train_index" => string(train_index),
+        "test_index" => string(test_index),
+        "degrees_f" => degrees_f,
+        "quantiles" => join(quantiles, ", "),  # Convert array to a comma-separated string
+        "initial_investment" => initial_investment,
+        "unit" => unit
+    )
 
+    # Convert the parameters dictionary into a DataFrame
+    parameters_df = DataFrame(parameters)
+    parameters_df = DataFrame([eltype(c) == Float32 ? convert(Vector{Float64}, c) : c for c in eachcol(parameters_df)], names(parameters_df))
 
-    println("Final portfolio value for the directional strategy with MAP: ", final_value_directional)
-    println("Final portfolio value for the mean-reversion strategy with MAP: ", final_value_mean_reversion)
+    #Var_train = Dict(Symbol(key) => value for (key, value) in Var_train)
+    #Var_test = Dict(Symbol(key) => value for (key, value) in Var_test)
+ 
+    Var_train_df = convert_dict_to_df(Var_train)
+    #Var_train_df = DataFrame([eltype(c) == Float32 ? convert(Vector{Float64}, c) : c for c in eachcol(Var_train_df)], names(Var_train_df))
+ 
+    Var_test_df = convert_dict_to_df(Var_test)
+    #Var_test_df = DataFrame([eltype(c) == Float32 ? convert(Vector{Float64}, c) : c for c in eachcol(Var_test_df)], names(Var_test_df))
+
+    # Specify the filename, including the new directory
+    filename = joinpath(new_dir, "my_results.xlsx")
+
+    # Write DataFrames to new worksheets in a workbook
+    XLSX.openxlsx(filename, mode="w") do xf
+        # Make sure all DataFrames are converted to compatible types here
+
+        sheet1 = XLSX.addsheet!(xf, "Parameters")
+        XLSX.writetable!(sheet1, Tables.columntable(parameters_df))
+          
+        sheet2 = XLSX.addsheet!(xf, "History_directional")
+        XLSX.writetable!(sheet2, Tables.columntable(history_directional))
+        
+        sheet3 = XLSX.addsheet!(xf, "History_mean")
+        XLSX.writetable!(sheet3, Tables.columntable(history_mean))
+
+        sheet4 = XLSX.addsheet!(xf, "History_hold")
+        XLSX.writetable!(sheet4, Tables.columntable(history_hold))
+
+        sheet5 = XLSX.addsheet!(xf, "History_directional_test")
+        XLSX.writetable!(sheet5, Tables.columntable(history_directional_test))
+        
+        sheet6 = XLSX.addsheet!(xf, "History_mean_test")
+        XLSX.writetable!(sheet6, Tables.columntable(history_mean_test))
+
+        sheet7 = XLSX.addsheet!(xf, "History_hold_test")
+        XLSX.writetable!(sheet7, Tables.columntable(history_hold_test))
+
+        sheet8 = XLSX.addsheet!(xf, "Var_Train")
+        XLSX.writetable!(sheet8, Tables.columntable(Var_train_df))
+
+        sheet9 = XLSX.addsheet!(xf, "Var_Test")
+        XLSX.writetable!(sheet9, Tables.columntable(Var_test_df))
+
+        # ... repeat for each DataFrame
+    end
+
+    # Save plots as images
+    plot(1:length(y_train), y_train, label="Actual")
+    plot!(1:length(y_train),σ_hat, label="Estimated")
+    # Specify the filename, including the new directory
+    plotfile_train = joinpath(new_dir, "train_plot.png")
+    savefig(plotfile_train)
+
+    plot(1:length(y_test), y_test, label="Actual")
+    plot!(1:length(y_test),σ_hat_test, label="Estimated")
+    # Specify the filename, including the new directory
+    plotfile_test = joinpath(new_dir, "test_plot.png")
+    savefig(plotfile_test)
+end
+
+train_index = 600:1000
+test_index = 1001:1100
+degrees_f = Float32(5)  # Degrees of freedom, replace ... with the actual value.
+quantiles = Float32.([0.01,0.05,0.1])  # The value to find the quantile for, replace ... with the actual value.
+initial_investment = 100000.0
+unit = 50
+
+# Loop over network structures
+for net in network_structures
+    backtest_and_save_to_excel(net, train_index, test_index, degrees_f, quantiles, initial_investment, unit)
 end

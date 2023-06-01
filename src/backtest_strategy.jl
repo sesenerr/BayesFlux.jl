@@ -66,7 +66,7 @@ end
 
 #write a holding strategy funtion as well which you buy as much as you can for the first day and keep it till end 
 
-function hold_strategy(portfolio::Portfolio, price::Float64, estimated_volatility::Float64, data::DataFrame, i::Int, vol_estimation_method::Symbol)
+function hold_strategy(portfolio::Portfolio, price::Float64, estimated_volatility::Float64, data::DataFrame, i::Int, vol_estimation_method::Symbol,unit::Int64)
     if i == 1
         n_etf = floor.(Int, portfolio.cash / price)
         return Portfolio(portfolio.cash - (price* n_etf), n_etf)

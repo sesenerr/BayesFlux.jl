@@ -53,38 +53,66 @@ y = Float32.(simulated_Garch["L"])
 simulated_σ = sqrt.(Float32.(simulated_Garch["sigma_squared"]))
 
 #y = y .^2
+#select the time interval
+# train_index = 1:924
+# test_index = 925:1155
+# full_index = 1:1155
+train_index = 1:400
+test_index = 401:500
+full_index = 1:500
 
+
+
+y_train, y_test = y[train_index], y[test_index]
+y_full = y[full_index]
+#arrange a train and test set properly
+x_train = make_rnn_tensor(reshape(y_train, :, 1), 5 + 1)
+y_train = vec(x_train[end, :, :])
+x_train = x_train[1:end-1, :, :]
+#arrange a train and test set properly
 
 ####### New likelihood Trial
 
 
 net = Chain(LSTM(1, 2), Dense(2, 1))  # last layer is linear output layer
 nc = destruct(net)
-like = ArchSeqToOneTDist(nc, Normal(0, 0.5),Float32(10))
+like = ArchSeqToOneTDist(nc, Normal(0, 0.5),Float32(5))
 prior = GaussianPrior(nc, 0.5f0)
 init = InitialiseAllSame(Normal(0.0f0, 0.5f0), like, prior)
 
 
 
-x = make_rnn_tensor(reshape(y, :, 1), 5 + 1)
-y = vec(x[end, :, :])
-x = x[1:end-1, :, :]
 
 
-bnn = BNN(x, y, like, prior, init)
+bnn = BNN(x_train, y_train, like, prior, init)
 opt = FluxModeFinder(bnn, Flux.RMSProp())
 θmap = find_mode(bnn, 10, 10000, opt)
 
 nethat = nc(θmap)
-log_σ  = vec([nethat(xx) for xx in eachslice(x; dims =1 )][end])
+log_σ  = vec([nethat(xx) for xx in eachslice(x_train; dims =1 )][end])
 σ_hat = exp.(log_σ)
+
+
 sqrt(mean(abs2, simulated_σ[6:n] .- σ_hat))
 
-log_σ
-yy = reshape(y[1:500],1,500)
-kkk= vec(nethat(yy))
-kkk
-##
+
+
+σ_hat_testt = estimate_test_σ(bnn, train_index, test_index, θmap, y_full)
+σ_hat_testt
+nethat = bnn.like.nc(θmap)
+shifted_index = train_index[:] .+ length(test_index)
+x_shifted = make_rnn_tensor(reshape(y_full[shifted_index], :, 1), 5 + 1)
+x_shifted = x_shifted[1:end-1, :, :]
+log_σ_whole  = vec([nethat(xx) for xx in eachslice(x_shifted; dims =1 )][end]) 
+σ_hat_whole = exp.(log_σ_whole)
+
+σ_hat_test
+
+length(test_index)
+σ_hat_whole[end-99:end]
+
+count(x -> x, σ_hat_testt .!= σ_hat_whole[end-99:end])
+
 ##
 last_sequence = x[end, 1:end, :]  # Taking the last sequence from your training data
 
@@ -92,7 +120,7 @@ k = nethat(last_sequence)[end]
 k[end]
 
 # plot the actual and estimated series
-plot(1:length(σ_hat), simulated_σ[6:500], label="Actual")
+plot(1:length(σ_hat), simulated_σ[6:400], label="Actual")
 plot!(1:length(σ_hat),σ_hat, label="Estimated")
 
 # add labels and legend
@@ -287,3 +315,34 @@ p_z_given_y = predictive_distribution(posterior_density, z, sampling_distributio
 
 
 
+
+#training-set BNN 
+
+#sampler
+sampler = SGNHTS(1f-2, 1f0; xi = 1f0^1, μ = 1f0)
+
+#sampling 
+ch = mcmc(bnn, 10, 50_000, sampler,θstart = θmap)
+ch = ch[:, end-20_000+1:end]
+chain = Chains(ch')
+
+#training-set BNN mean/median VaRs estimation
+σhats = naive_train_bnn_σ_prediction_recurrent(bnn,ch)
+
+
+#Test set estimation -computationaly expensive
+σhats_test = naive_test_bnn_σ_prediction_recurrent(bnn,y_full,train_index,test_index,ch)
+VaRs_test_bnn = bnn_var_prediction(σhats_test,ch,quant)
+
+
+function estimate_test_σ(bnn, train_index, test_index, θmap, y_full::Array{Float32, 1})
+    train_index = train_index .- minimum(train_index) .+ 1
+    nethat = bnn.like.nc(θmap)
+    shifted_index = train_index[:] .+ length(test_index)
+    x_shifted = make_rnn_tensor(reshape(y_full[shifted_index], :, 1), 5 + 1)
+    x_shifted = x_shifted[1:end-1, :, :]
+    log_σ_whole  = vec([nethat(xx) for xx in eachslice(x_shifted; dims =1 )][end]) 
+    σ_hat_test = exp.(log_σ_whole)
+    return σ_hat_test[end-(length(test_index)-1):end]
+end
+bnn_trial = naive_test_bnn_σ_prediction_recurrent(bnn,y_full,train_index,test_index,ch)
