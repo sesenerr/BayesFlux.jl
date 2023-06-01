@@ -99,30 +99,6 @@ end
 
 
 
-# Main function on progress
-function main(
-    net ::String,
-    train_index::UnitRange{Int64}, 
-    test_index::UnitRange{Int64}, 
-    degrees_f::Float32, 
-    quantiles::Vector{Float32}, 
-    initial_investment::Float64
-)
-    df = load_data("src/data/SPY_data.csv")
-    X_train, y_train, X_test, y_test, X_full, y_full, df, df_train_index, df_test_index = preprocess_data(df, train_index, test_index)
-    quant = calculate_quantile(degrees_f, quantiles)
-    bnn = get_bnn_data(net,X_train, y_train, degrees_f)
-    θmap, σ_hat, VaRs_MAP = calculate_map_estimation(bnn, X_train)
-    σ_hat_test, VaRs_test_MAP = calculate_test_map_estimation(bnn, train_index, test_index, θmap, X_full)
-    df = update_dataframe(df, df_train_index, df_test_index, σ_hat, σ_hat_test)
-    final_value_directional = calculate_portfolio_direction(df, df_test_index, initial_investment, directional_strategy, "MAP")
-    final_value_mean_reversion = calculate_portfolio_mean_reversion(df, df_test_index, initial_investment, mean_reversion_strategy, "MAP")
-
-
-    println("Final portfolio value for the directional strategy with MAP: ", final_value_directional)
-    println("Final portfolio value for the mean-reversion strategy with MAP: ", final_value_mean_reversion)
-end
-
 net = Chain(RNN(2, 6), Dense(6, 1))
 train_index = 600:1000
 test_index = 1001:1100
@@ -131,11 +107,7 @@ quantiles = Float32.([0.01,0.05,0.1])   # The value to find the quantile for, re
 initial_investment = 100000.0
 
 # Call Main Function
-main(net,train_index, test_index, degrees_f, quantiles, initial_investment)
-
-
-net
-
+#main(net,train_index, test_index, degrees_f, quantiles, initial_investment)
 
 # Main function experimental
 #function main()
@@ -174,3 +146,30 @@ history_hold = backtest_strategy(df[df_test_index,:], initial_investment, hold_s
 
 #end
 
+
+
+
+
+# Main function on progress
+function main(
+    net ::String,
+    train_index::UnitRange{Int64}, 
+    test_index::UnitRange{Int64}, 
+    degrees_f::Float32, 
+    quantiles::Vector{Float32}, 
+    initial_investment::Float64
+)
+    df = load_data("src/data/SPY_data.csv")
+    X_train, y_train, X_test, y_test, X_full, y_full, df, df_train_index, df_test_index = preprocess_data(df, train_index, test_index)
+    quant = calculate_quantile(degrees_f, quantiles)
+    bnn = get_bnn_data(net,X_train, y_train, degrees_f)
+    θmap, σ_hat, VaRs_MAP = calculate_map_estimation(bnn, X_train)
+    σ_hat_test, VaRs_test_MAP = calculate_test_map_estimation(bnn, train_index, test_index, θmap, X_full)
+    df = update_dataframe(df, df_train_index, df_test_index, σ_hat, σ_hat_test)
+    final_value_directional = calculate_portfolio_direction(df, df_test_index, initial_investment, directional_strategy, "MAP")
+    final_value_mean_reversion = calculate_portfolio_mean_reversion(df, df_test_index, initial_investment, mean_reversion_strategy, "MAP")
+
+
+    println("Final portfolio value for the directional strategy with MAP: ", final_value_directional)
+    println("Final portfolio value for the mean-reversion strategy with MAP: ", final_value_mean_reversion)
+end

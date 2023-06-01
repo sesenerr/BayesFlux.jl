@@ -200,41 +200,69 @@ kkk
 
 
 
+# function estimate_test_σ(bnn, train_index, test_index, θmap, X_full::Array{Float32, 2})
+#     log_σ_test = []
+#     train_index = train_index .- minimum(train_index) .+ 1
+#     for i in 1:(length(test_index))
+#         nethat = bnn.like.nc(θmap)
+#         shifted_index = train_index[:] .+ i
+#         X_shifted = make_rnn_tensor(X_full[shifted_index,:], 5 + 1)
+#         X_shifted = X_shifted[1:end-1, 2:end, :]
+#         log_σ_whole  = vec([nethat(xx) for xx in eachslice(X_shifted; dims =1 )][end]) 
+#         push!(log_σ_test, log_σ_whole[end])
+#     end
+#     σ_hat_test = exp.(log_σ_test)
+#     return σ_hat_test
+# end
+
+# function naive_test_bnn_σ_prediction_recurrent(bnn,X_full::Array{Float32, 2},train_index,test_index, draws::Array{T, 2}) where {T}
+#     σhats = Array{T, 2}(undef, length(test_index), size(draws, 2))
+#     log_σ_whole = Array{T, 2}(undef, length(train_index)-5, size(draws, 2))
+#     train_index = train_index .- minimum(train_index) .+ 1
+#     # Create the progress bar
+#     p = Progress(length(test_index), 1, "Processing...", 50)
+
+#     for i in 1:length(test_index)
+#         next!(p) # Update the progress bar
+#         shifted_index = train_index[:] .+ i
+#         X_shifted = make_rnn_tensor(X_full[shifted_index,:], 5 + 1)
+#         X_shifted = X_shifted[1:end-1, 2:end, :]
+#         Threads.@threads for j=1:size(draws, 2)
+#             net = bnn.like.nc(draws[:, j])
+#             σh = vec([net(xx) for xx in eachslice(X_shifted; dims = 1)][end])
+#             log_σ_whole[:,j] = σh    
+#         end
+#         σhats[i,:] = exp.(log_σ_whole[end,:])
+#     end    
+#     return σhats
+# end
+
+
 function estimate_test_σ(bnn, train_index, test_index, θmap, X_full::Array{Float32, 2})
-    log_σ_test = []
     train_index = train_index .- minimum(train_index) .+ 1
-    for i in 1:(length(test_index))
-        nethat = bnn.like.nc(θmap)
-        shifted_index = train_index[:] .+ i
-        X_shifted = make_rnn_tensor(X_full[shifted_index,:], 5 + 1)
-        X_shifted = X_shifted[1:end-1, 2:end, :]
-        log_σ_whole  = vec([nethat(xx) for xx in eachslice(X_shifted; dims =1 )][end]) 
-        push!(log_σ_test, log_σ_whole[end])
-    end
-    σ_hat_test = exp.(log_σ_test)
-    return σ_hat_test
+    nethat = bnn.like.nc(θmap)
+    shifted_index = train_index[:] .+ length(test_index)
+    X_shifted = make_rnn_tensor(X_full[shifted_index,:], 5 + 1)
+    X_shifted = X_shifted[1:end-1, 2:end, :]
+    log_σ_whole  = vec([nethat(xx) for xx in eachslice(X_shifted; dims =1 )][end]) 
+    σ_hat_test = exp.(log_σ_whole)
+    return σ_hat_test[end-(length(test_index)-1):end]
 end
 
 
 function naive_test_bnn_σ_prediction_recurrent(bnn,X_full::Array{Float32, 2},train_index,test_index, draws::Array{T, 2}) where {T}
-    σhats = Array{T, 2}(undef, length(test_index), size(draws, 2))
     log_σ_whole = Array{T, 2}(undef, length(train_index)-5, size(draws, 2))
     train_index = train_index .- minimum(train_index) .+ 1
-    # Create the progress bar
-    p = Progress(length(test_index), 1, "Processing...", 50)
-
-    for i in 1:length(test_index)
-        next!(p) # Update the progress bar
-        shifted_index = train_index[:] .+ i
-        X_shifted = make_rnn_tensor(X_full[shifted_index,:], 5 + 1)
-        X_shifted = X_shifted[1:end-1, 2:end, :]
-        Threads.@threads for j=1:size(draws, 2)
-            net = bnn.like.nc(draws[:, j])
-            σh = vec([net(xx) for xx in eachslice(X_shifted; dims = 1)][end])
-            log_σ_whole[:,j] = σh    
+    
+    shifted_index = train_index[:] .+ length(test_index)
+    X_shifted = make_rnn_tensor(X_full[shifted_index,:], 5 + 1)
+    X_shifted = X_shifted[1:end-1, 2:end, :]
+    Threads.@threads for j=1:size(draws, 2)
+        net = bnn.like.nc(draws[:, j])
+        σh = vec([net(xx) for xx in eachslice(X_shifted; dims = 1)][end])
+        log_σ_whole[:,j] = σh    
         end
-        σhats[i,:] = exp.(log_σ_whole[end,:])
-    end    
+    σhats = exp.(log_σ_whole[end-(length(test_index)-1):end,:])
     return σhats
 end
 

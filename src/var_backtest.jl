@@ -34,17 +34,30 @@ struct VaRLRResults
 end
 
 function VaRLR(returns::Array{Float32,1}, VaR::Array{Float32,1}, alphas::Array{Float32,1})
-    # Initializations
-    hit = returns .< VaR
-    n1 = sum(hit)
-    n0 = length(hit) - n1
-    PF = n1/length(hit)
+    VaR = reshape(VaR, :, 1)
+    VaRLR(returns, VaR, alphas)
+end
 
+function VaRLR(returns::Array{Float32,1}, VaR::Array{Float32,2}, alphas::Array{Float32,1})
+    # Ensure that VaR and alphas dimensions match
+    if size(VaR, 2) != length(alphas)
+        error("The number of VaR columns must match the length of alphas")
+    end
+
+    # Initializations
     results = Dict()
 
-    
+    for i in 1:length(alphas)
+        hit = returns .< VaR[:, i]
+        n1 = sum(hit)
+        n0 = length(hit) - n1
+        PF = n1/length(hit)
+        if (PF == 0)
+            println("Your estimation is overshooting, 0 mistake for alpha = ", alphas[i])
+            continue
+        end
 
-    for alpha in alphas
+        alpha = alphas[i]
 
         limits = cumsum(pdf.(Binomial(length(returns), alpha), 1:50))
         green = count(limits .< 0.90)
@@ -66,9 +79,9 @@ function VaRLR(returns::Array{Float32,1}, VaR::Array{Float32,1}, alphas::Array{F
         # Christoffersen Tests 
         # Unconditional Coverage 
         if (n1 != 0 && PF != 0)
-            println("$alpha,$n0,$n1,$PF")
+            #println("$alpha,$n0,$n1,$PF")
             LRUC = -2*(n1*log(alpha) + n0*log(1-alpha) - n1*log(PF) - n0*log(1-PF))
-            println(LRUC)
+            #println(LRUC)
         end
 
         # Independence Coverage 

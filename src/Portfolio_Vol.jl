@@ -183,42 +183,31 @@ function bnn_var_prediction(σhats, θmap::Array{T, 1}, quant) where {T}
     return Float32.(θmap[end] .+ result)
 end
 
-train_index
 
 function estimate_test_σ(bnn, train_index, test_index, θmap, y_full::Array{Float32, 1})
-    log_σ_test_map = []
     train_index = train_index .- minimum(train_index) .+ 1
-    for i in 1:length(test_index)
-        nethat = bnn.like.nc(θmap)
-        shifted_index = train_index[:] .+ i
-        x_shifted = make_rnn_tensor(reshape(y_full[shifted_index], :, 1), 5 + 1)
-        x_shifted = x_shifted[1:end-1, :, :]
-        log_σ_whole  = vec([nethat(xx) for xx in eachslice(x_shifted; dims =1 )][end]) 
-        push!(log_σ_test_map, log_σ_whole[end])
-    end
-    σ_hat_test = exp.(log_σ_test_map)
-    return σ_hat_test
+    nethat = bnn.like.nc(θmap)
+    shifted_index = train_index[:] .+ length(test_index)
+    x_shifted = make_rnn_tensor(reshape(y_full[shifted_index], :, 1), 5 + 1)
+    x_shifted = x_shifted[1:end-1, :, :]
+    log_σ_whole  = vec([nethat(xx) for xx in eachslice(x_shifted; dims =1 )][end]) 
+    σ_hat_test = exp.(log_σ_whole)
+    return σ_hat_test[end-(length(test_index)-1):end]
 end
 
 function naive_test_bnn_σ_prediction_recurrent(bnn,y_full::Array{Float32, 1},train_index,test_index, draws::Array{T, 2}) where {T}
-    σhats = Array{T, 2}(undef, length(test_index), size(draws, 2))
     log_σ_whole = Array{T, 2}(undef, length(train_index)-5, size(draws, 2))
     train_index = train_index .- minimum(train_index) .+ 1
-    # Create the progress bar
-    p = Progress(length(test_index), 1, "Processing...", 50)
 
-    for i in 1:length(test_index)
-        next!(p) # Update the progress bar
-        shifted_index = train_index[:] .+ i
-        x_shifted = make_rnn_tensor(reshape(y_full[shifted_index], :, 1), 5 + 1)
-        x_shifted = x_shifted[1:end-1, :, :]
-        Threads.@threads for j=1:size(draws, 2)
-            net = bnn.like.nc(draws[:, j])
-            σh = vec([net(xx) for xx in eachslice(x_shifted; dims = 1)][end])
-            log_σ_whole[:,j] = σh    
+    shifted_index = train_index[:] .+ length(test_index)
+    x_shifted = make_rnn_tensor(reshape(y_full[shifted_index], :, 1), 5 + 1)
+    x_shifted = x_shifted[1:end-1, :, :]
+    Threads.@threads for j=1:size(draws, 2)
+        net = bnn.like.nc(draws[:, j])
+        σh = vec([net(xx) for xx in eachslice(x_shifted; dims = 1)][end])
+        log_σ_whole[:,j] = σh    
         end
-        σhats[i,:] = exp.(log_σ_whole[end,:])
-    end    
+    σhats = exp.(log_σ_whole[end-(length(test_index)-1):end,:])
     return σhats
 end
 
@@ -237,17 +226,3 @@ end
 
 
 
-function estimate_test_σ(bnn, train_index, test_index, θmap, X_full::Array{Float32, 2})
-    log_σ_test = []
-    train_index = train_index .- minimum(train_index) .+ 1
-    for i in 1:(length(test_index))
-        nethat = bnn.like.nc(θmap)
-        shifted_index = train_index[:] .+ i
-        X_shifted = make_rnn_tensor(X_full[shifted_index,:], 5 + 1)
-        X_shifted = X_shifted[1:end-1, 2:end, :]
-        log_σ_whole  = vec([nethat(xx) for xx in eachslice(X_shifted; dims =1 )][end]) 
-        push!(log_σ_test, log_σ_whole[end])
-    end
-    σ_hat_test = exp.(log_σ_test)
-    return σ_hat_test
-end
