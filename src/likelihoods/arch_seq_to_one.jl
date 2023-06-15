@@ -52,10 +52,11 @@ function posterior_predict(l::ArchSeqToOneNormal{T,F,D}, x::Array{T,3}, θnet::A
     θlike = T.(θlike)
 
     net = l.nc(θnet)
-    yhat = vec([net(xx) for xx in eachslice(x; dims=1)][end])
-    sigma = invlink(l.prior_μ, θlike[1])
+    log_σ = vec([net(xx) for xx in eachslice(x; dims=1)][end])
+    σ = exp.(log_σ)
+    σ = T.(σ)
 
-    ypp = rand(MvNormal(yhat, sigma^2 * I))
+    ypp = rand(MvNormal(θlike[1], σ^2 * I))
     return ypp
 end
 
@@ -102,17 +103,18 @@ function (l::ArchSeqToOneTDist{T,F,D})(x::Array{T,3}, y::Vector{T}, θnet::Abstr
 end
 
 
-function posterior_predict(l::SeqToOneTDist{T,F,D}, x::Array{T,3}, θnet::AbstractVector, θlike::AbstractVector) where {T,F,D}
+function posterior_predict(l::ArchSeqToOneTDist{T,F,D}, x::Array{T,3}, θnet::AbstractVector, θlike::AbstractVector) where {T,F,D}
     θnet = T.(θnet)
     θlike = T.(θlike)
 
 
     net = l.nc(θnet)
-    yhat = vec([net(xx) for xx in eachslice(x; dims=1)][end])
-    sigma = invlink(l.prior_μ, θlike[1])
-    n = length(yhat)
+    log_σ = vec([net(xx) for xx in eachslice(x; dims=1)][end])
+    σ = exp.(log_σ)
+    σ = T.(σ)
+    n = length(σ)
 
-    ypp = sigma * rand(TDist(l.ν), n) + yhat
+    ypp = σ * rand(TDist(l.ν), n) + θlike[1]
     return ypp
 end
 
