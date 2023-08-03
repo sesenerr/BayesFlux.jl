@@ -1,17 +1,14 @@
 # Required Libraries
-using CSV
-using DataFrames
-using Statistics
-using Flux
-using ExcelFiles,Plots
-using XLSX
-using ARCHModels
-using StatsBase # required for the coef function
+include("BayesFlux.jl")
+using Random, Distributions, LinearAlgebra, Plots
+using MCMCChains, Bijectors, Statistics, Flux, StatsBase
+using .BayesFlux, ARCHModels 
+using CSV,DataFrames,ExcelFiles,Plots,XLSX,Dates
 
 
 #network structures
 network_structures = [
-   # Flux.Chain(RNN(2, 2), Dense(2, 1)), 
+    Flux.Chain(RNN(2, 2), Dense(2, 1)), 
     Flux.Chain(RNN(2, 4), Dense(4, 1)), 
     Flux.Chain(RNN(2, 6), Dense(6, 1)), 
     Flux.Chain(RNN(2, 10), Dense(10, 1)),
@@ -38,7 +35,6 @@ function load_data(file_path)
     df = rename(data, :"Adj Close" => :"Price")
     return df
 end
-
 
 # Preprocess data
 #Scaling the input data 
@@ -95,7 +91,7 @@ function calculate_quantile(degrees_f, quantiles)
     return quant
 end
 
-# Get Bnn
+#get bnn
 function get_bnn_data(net::Flux.Chain{T},X_train, y_train, degrees_f) where {T}
     bnn = get_bnn(net,X_train,(y_train),degrees_f)
     return bnn
@@ -374,6 +370,9 @@ function backtest_and_save_to_excell(
 
     sheet14 = XLSX.addsheet!(xf, "Var_Test")
     XLSX.writetable!(sheet14, Tables.columntable(Var_test_df))
+    
+    sheet15 = XLSX.addsheet!(xf, "Data Frame")
+    XLSX.writetable!(sheet15, Tables.columntable(df))
 
     # ... repeat for each DataFrame
     end
@@ -399,24 +398,6 @@ function backtest_and_save_to_excell(
     plotfile_test = joinpath(new_dir, "test_plot.png")
     savefig(plotfile_test)
 
-end
-
-#Parameters 
-train_index = 1:1800
-val_index = 1801:1950
-test_index = 1951:2100
-degrees_f = Float32(5)  # Degrees of freedom, replace ... with the actual value.
-quantiles = Float32.([0.01,0.05,0.1])  # The value to find the quantile for, replace ... with the actual value.
-initial_investment = 100000.0
-unit = 50
-
-for net in network_structures
-    try
-        backtest_and_save_to_excell(net, train_index, val_index, test_index, degrees_f, quantiles, initial_investment, unit)
-    catch e
-        println("An error occurred: ", e)
-        continue
-    end
 end
 
 
@@ -465,7 +446,7 @@ end
     end
     
     # Function to estimate σs for BNN
-    function get_bnn_predictions(bnn, θmap, X_full::Array{Float32, 2}, train_index,val_index, test_index, quant)
+    function get_bnn_predictions(bnn, θmap, X_full::Array{Float32, 2}, train_index,val_index, test_index, quant,)
         sampler = SGNHTS(1f-2, 1f0; xi = 1f0^1, μ = 1f0)
     
         # Sampling 
@@ -493,12 +474,12 @@ end
         
         # Training-set Bayesian Neural Network (BNN) mean/median VaRs estimation
         σhats_bbb = naive_train_bnn_σ_prediction_recurrent(bnn,ch_bbb)
-        VaRs_bnn_bbb = bnn_var_prediction(σhats,ch_bbb,quant)
+        VaRs_bnn_bbb = bnn_var_prediction(σhats_bbb,ch_bbb,quant)
             
         # Test set estimation - computationally expensive
         σhats_validation_bbb , σhats_test_bbb = naive_test_bnn_σ_prediction_recurrent(bnn, X_full, train_index, val_index, test_index,ch_bbb)
-        VaRs_validation_bnn_bbb = bnn_var_prediction(σhats_validation,ch,quant)
-        VaRs_test_bnn_bbb = bnn_var_prediction(σhats_test,ch,quant)
+        VaRs_validation_bnn_bbb = bnn_var_prediction(σhats_validation_bbb,ch_bbb,quant)
+        VaRs_test_bnn_bbb = bnn_var_prediction(σhats_test_bbb,ch_bbb,quant)
     
         return ch_bbb, σhats_bbb, σhats_validation_bbb, σhats_test_bbb, VaRs_bnn_bbb, VaRs_validation_bnn_bbb, VaRs_test_bnn_bbb
     end
@@ -519,6 +500,14 @@ end
             ylab = "Percent Observations below"
         )
         plot!(x -> x, minimum(target_q), maximum(target_q), label = "Theoretical")
+    end
+    
+    # Function to get observed quantiles for BNN/BBB
+    function get_observed_quantiles(y, posterior_yhat, target_q = 0.05:0.05:0.95)
+        qs = [quantile(yr, target_q) for yr in eachrow(posterior_yhat)]
+        qs = reduce(hcat, qs)
+        observed_q = mean(reshape(y, 1, :) .< qs; dims = 2)
+        return observed_q
     end
 
     # Function to calculate RMSE 
@@ -550,4 +539,185 @@ end
         return df_rmse
     end
 
+    # Function to create BNN Var predictions for mean and median 
+    function bnn_var_prediction(σhats, draws::Array{T, 2}, quant) where {T}
+        VaRs = reshape(draws[end,:], 1, :) .+ (σhats .* reshape(quant, 1, 1, :)) 
+        
+        # Compute the final matrices
+        final_matrix_mean = dropdims(mapslices(mean, VaRs, dims=2), dims=2)
+        final_matrix_median = dropdims(mapslices(median, VaRs, dims=2), dims=2)
+    
+        # Reshape the matrices to add a third dimension
+        final_matrix_mean = reshape(final_matrix_mean, size(final_matrix_mean)..., 1)
+        final_matrix_median = reshape(final_matrix_median, size(final_matrix_median)..., 1)
+    
+        # Combine both results
+        final_matrix = cat(final_matrix_mean, final_matrix_median, dims=3)
+        return Float32.(final_matrix)
+    end    
+    
+    function bnn_var_prediction(σhats, θmap::Array{T, 1}, quant) where {T}
+        result = hcat([σhats .* q for q in quant]...)
+        return Float32.(θmap[end] .+ result)
+    end
 
+    # Function to estimate MAP train set σ estimation
+    function naive_train_bnn_σ_prediction_recurrent(bnn, draws::Array{T, 2}; x = bnn.x, y = bnn.y) where {T}
+        log_σhats = Array{T, 2}(undef, length(y), size(draws, 2))
+        Threads.@threads for i=1:size(draws, 2)
+            net = bnn.like.nc(draws[:, i])
+            σh = vec([net(xx) for xx in eachslice(x; dims = 1)][end])
+            log_σhats[:,i] = σh    
+        end
+        σhats = exp.(log_σhats)
+        return σhats
+    end
+
+    ########################### MAIN ################################
+
+    #Parameters 
+    train_index = 1:1800
+    val_index = 1801:1950
+    test_index = 1951:2100
+    degrees_f = Float32(5)  # Degrees of freedom, replace ... with the actual value.
+    quantiles = Float32.([0.01,0.05,0.1])  # The value to find the quantile for, replace ... with the actual value.
+    initial_investment = 100000.0
+    unit = 50
+
+    #run main function 
+    for net in network_structures
+    backtest_and_save_to_excell(net, train_index, val_index, test_index, degrees_f, quantiles, initial_investment, unit)
+    end
+
+    #run main function 
+    for net in network_structures
+        try
+            backtest_and_save_to_excell(net, train_index, val_index, test_index, degrees_f, quantiles, initial_investment, unit)
+        catch e
+            println("An error occurred: ", e)
+            continue
+        end
+    end
+
+
+
+    ########################### Additional Plots ###########################
+
+    df = load_data("src/data/SPY_data.csv")
+
+
+    p = plot(df[:, :Date], df[:, :"Log Return"],
+        title = "Log Return over Time",
+        xlab = "Date",
+        ylab = "Log Return",
+        legend = false,
+        linewidth = 2,
+        linecolor = :blue)
+
+        date1 = Date(2022, 02, 28)
+        date2 = Date(2022, 11, 03)
+        
+        plot!(p, [date1, date1], [minimum(df[:, :"Log Return"]), maximum(df[:, :"Log Return"])], line=:dash, linewidth=2, linecolor=:red)
+        plot!(p, [date2, date2], [minimum(df[:, :"Log Return"]), maximum(df[:, :"Log Return"])], line=:dash, linewidth=2, linecolor=:red)
+        
+        display(p)
+
+     savefig(p, "Log Return over Time")
+
+
+
+    # Assuming df is your DataFrame and :Date and :Price are correct column labels
+    p = plot(df[:, :Date], df[:, :Price],
+            title = "Price over Time",
+            xlab = "Date",
+            ylab = "Price",
+            legend = false,
+            linewidth = 2,
+            linecolor = :blue);
+
+    # Let's add two vertical lines at specific dates
+    # Let's add two vertical lines at specific dates
+    date1 = Date(2022, 02, 28)
+    date2 = Date(2022, 11, 03)
+
+    plot!(p, [date1, date1], [minimum(df[:, :Price]), maximum(df[:, :Price])], line=:dash, linewidth=2, linecolor=:red)
+    plot!(p, [date2, date2], [minimum(df[:, :Price]), maximum(df[:, :Price])], line=:dash, linewidth=2, linecolor=:red)
+
+    display(p)
+    savefig(p, "Price")
+
+    X_train, y_train, y_val, y_test, X_full, y_full, df, df_train_index,df_validation_index, df_test_index = preprocess_data(df, train_index,val_index, test_index)
+
+    ###GARCH
+    # formal test for the presence of volatility clustering is Engle's (1982) 
+    ARCHLMTest(y_train, 1)
+    am = fit(GARCH{1, 1}, y_train,dist=StdT);
+    
+    # Now we can get the coefficients
+    coefficients = coef.(am)
+    garch_vol = fittedVol(y_full, coefficients[1], coefficients[2], coefficients[3])[6:end]
+    
+    proxy_vol_2 = y_full[6:end].^2
+
+    # Convert the vector to a DataFrame
+    df__ = DataFrame(MyVector = garch_vol)
+
+    # Write the DataFrame to a CSV file
+    CSV.write("my_vector.csv", df__)
+
+
+
+    df = CSV.read("my_vector.csv",DataFrame)
+
+
+    df = df[1:150,:]
+
+
+    # Plot the first strategy
+    p = plot(df[:, :Date], df[:, :Directional], label="Directional Strategy", linewidth = 2)
+
+    # Add the second strategy to the plot
+    plot!(p, df[:, :Date], df[:, :Mean], label="Mean Reversion Strategy", linewidth = 2)
+
+    # Add the third strategy to the plot
+    plot!(p, df[:, :Date], df[:, :Hold], label="Hold Strategy", linewidth = 2)
+
+    # Add labels and title
+    title!("Strategies over Time")
+    xlabel!("Date")
+    ylabel!("Value")
+
+    # Display the plot
+    display(p)
+
+
+
+
+    # Assuming your DataFrame is named `df`
+
+    # Plot the first strategy
+    p = plot(df[:, :Date], df[:, :Directional], label="Directional Strategy", linewidth = 2)
+
+    # Add the second strategy to the plot
+    plot!(p, df[:, :Date], df[:, :Mean], label="Mean Reversion Strategy", linewidth = 2)
+
+    # Add the third strategy to the plot
+    plot!(p, df[:, :Date], df[:, :Hold], label="Hold Strategy", linewidth = 2)
+
+    # Add labels and title
+    title!(p, "Strategies over Time")
+    xlabel!(p, "Date")
+    ylabel!(p, "Value")
+
+    # Here, we are taking every 20th date from your DataFrame to display on x-axis.
+    indices = collect(1:40:length(df.Date))
+    date_ticks = df.Date[indices]
+
+    # Convert date_ticks to array of Strings
+    date_ticks_str = string.(date_ticks)
+
+    xticks!(p, (indices, date_ticks_str))
+
+    # Display the plot
+    display(p)
+    savefig(p,Trading)

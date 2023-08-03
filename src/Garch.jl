@@ -26,7 +26,7 @@ vol = (20^2)/252 #Implying a volatility of 20% per year
 #"Function to Simulate GARCH process."
 function garchNDraws(n::Int, α::Float64, β::Float64, vol::Float64)
     ω = vol*(1-α-β)
-    d = TDist(10)  # Create a t-distribution with 10 degrees of freedom
+    d = TDist(5)  # Create a t-distribution with 10 degrees of freedom
     ϵ = rand(d,n)
     L = similar(ϵ)
     L[1] = sqrt(vol) * ϵ[1]
@@ -74,9 +74,9 @@ x_train = x_train[1:end-1, :, :]
 ####### New likelihood Trial
 
 
-net = Chain(LSTM(1, 2), Dense(2, 1))  # last layer is linear output layer
+net = Chain(RNN(1, 2), Dense(2, 2))  # last layer is linear output layer
 nc = destruct(net)
-like = ArchSeqToOneTDist(nc, Normal(0, 0.5),Float32(5))
+like =GarchSeqToOneTDist(nc, Normal(0, 0.5),Float32(5))
 prior = GaussianPrior(nc, 0.5f0)
 init = InitialiseAllSame(Normal(0.0f0, 0.5f0), like, prior)
 
@@ -86,10 +86,12 @@ init = InitialiseAllSame(Normal(0.0f0, 0.5f0), like, prior)
 
 bnn = BNN(x_train, y_train, like, prior, init)
 opt = FluxModeFinder(bnn, Flux.RMSProp())
-θmap = find_mode(bnn, 10, 10000, opt)
+θmap = find_mode(bnn, 10, 5000, opt)
 
 nethat = nc(θmap)
-log_σ  = vec([nethat(xx) for xx in eachslice(x_train; dims =1 )][end])
+parameters = [nethat(xx) for xx in eachslice(x_train; dims =1 )][end]
+μ = parameters[1, :]
+log_σ = parameters[2, :]
 σ_hat = exp.(log_σ)
 
 
@@ -155,7 +157,7 @@ sampler = SGLD(Float32; stepsize_a = 10f-2, stepsize_b = 0.01f0, stepsize_γ = 0
 sampler = SGNHTS(1f-2, 1f0; xi = 1f0^1, μ = 1f0)
 
 
-ch = mcmc(bnn, 10, 50_000, sampler)
+ch = mcmc(bnn, 10, 50_000, SGNHTS(1f-2, 1f0; xi = 1f0^1, μ = 1f0))
 ch = ch[:, end-20_000+1:end]
 chain = Chains(ch')
 
@@ -187,7 +189,7 @@ maximum(summarystats(chain_σhat)[:, :rhat])
 posterior_log_σhat = sample_posterior_predict(bnn, ch)
 posterior_σhat = exp.(posterior_log_σhat)
 t_q = 0.05:0.05:0.95
-o_q = get_observed_quantiles(simulated_σ[6:500], posterior_σhat, t_q)
+o_q = get_observed_quantiles(y_train, posterior_log_σhat, t_q)
 plot(t_q, o_q, label = "Posterior Predictive", legend=:topleft,
     xlab = "Target Quantile", ylab = "Observed Quantile")
 plot!(x->x, t_q, label = "Target")

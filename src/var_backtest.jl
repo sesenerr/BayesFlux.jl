@@ -6,7 +6,7 @@ using Distributions
 #unconditional coverage, independence, and conditional coverage family of tests.
 #----------------------------------------------------------------------- 
 # USAGE:  
-# results = VaRLR(retuns, VaR, alphas) 
+# results = VaR(retuns, VaR, alphas) 
 # 
 # INPUTS: 
 # returns:     ( m x 1 ) vector of the out-of-sample data, 
@@ -23,7 +23,7 @@ using Distributions
 #           Basel:   Basel II Accord 
 #----------------------------------------------------------------------- 
 
-struct VaRLRResults
+struct VaRResults
     PF::Float32
     TUFF::Int
     LRTUFF::Float32
@@ -33,12 +33,12 @@ struct VaRLRResults
     BASEL::Int
 end
 
-function VaRLR(returns::Array{Float32,1}, VaR::Array{Float32,1}, alphas::Array{Float32,1})
+function VaR(returns::Array{Float32,1}, VaR::Array{Float32,1}, alphas::Array{Float32,1})
     VaR = reshape(VaR, :, 1)
-    VaRLR(returns, VaR, alphas)
+    VaR(returns, VaR, alphas)
 end
 
-function VaRLR(returns::Array{Float32,1}, VaR::Array{Float32,2}, alphas::Array{Float32,1})
+function VaR(returns::Array{Float32,1}, VaR::Array{Float32,2}, alphas::Array{Float32,1})
     # Ensure that VaR and alphas dimensions match
     if size(VaR, 2) != length(alphas)
         error("The number of VaR columns must match the length of alphas")
@@ -123,7 +123,7 @@ function VaRLR(returns::Array{Float32,1}, VaR::Array{Float32,2}, alphas::Array{F
             BASEL = 1
         end
 
-        results[alpha] = VaRLRResults(PF, TUFF, LRTUFF, LRUC, LRIND, LRCC, BASEL)
+        results[alpha] = VaRResults(PF, TUFF, LRTUFF, LRUC, LRIND, LRCC, BASEL)
     end
 
     return results

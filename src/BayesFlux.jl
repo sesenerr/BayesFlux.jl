@@ -18,8 +18,11 @@ export SeqToOneNormal, SeqToOneTDist
 
 #####Trial likelihoods
 include("./likelihoods/arch_seq_to_one.jl")
+include("./likelihoods/garch_seq_to_one.jl")
 export ArchSeqToOneNormal
 export ArchSeqToOneTDist
+export GarchSeqToOneNormal
+export GarchSeqToOneTDist
 
 include("./netpriors/abstract.jl")
 include("./netpriors/gaussian.jl")
@@ -85,5 +88,6 @@ export bbb
 # Utilities
 include("./utils/rnn_utils.jl")
 export make_rnn_tensor
+
 
 end # module

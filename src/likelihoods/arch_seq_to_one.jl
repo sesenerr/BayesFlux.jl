@@ -114,7 +114,7 @@ function posterior_predict(l::ArchSeqToOneTDist{T,F,D}, x::Array{T,3}, θnet::Ab
     σ = T.(σ)
     n = length(σ)
 
-    ypp = σ * rand(TDist(l.ν), n) + θlike[1]
+    ypp = σ .* rand(TDist(l.ν), n) .+ θlike[1]
     return ypp
 end
 
