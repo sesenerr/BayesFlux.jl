@@ -16,14 +16,12 @@ Assumes is two outputs. Thus, the last layer must have output size two.
 # Argumentsß
 ßß
 - `nc`: obtained using [`destruct`](@ref)
-- `prior_μ`: a prior distribution for the standard deviation
-
 """
 
 struct GarchSeqToOneNormal{T,F,D<:Distributions.Distribution} <: BNNLikelihood
     num_params_like::Int
     nc::NetConstructor{T,F}
-# TODO: rename the prior(μ) 
+    #prior for the distribution paramaters is not used, but kept it for consistency of the package
     prior_μ::D
 end
 
@@ -72,16 +70,18 @@ end
 """
     SeqToOneTDist(nc::NetConstructor{T, F}, prior_μ::D, ν::T) where {T, F, D}
 
-Use a Student-T likelihood for a Seq-to-One architecture with a single output
+Use a Student-T likelihood for a Seq-to-One architecture with a multiple(two) outputs
 and known degress of freedom.
 
-Assumes is a single output. Thus, the last layer must have output size one. 
+Assumes that multiple(two) outputs. Thus, the last layer must have output size of two. 
 
 # Arguments
 
 - `nc`: obtained using [`destruct`](@ref)
 - `prior_μ`: a prior distribution for the standard deviation
 - `ν`: degrees of freedom
+
+Note that #prior for the distribution paramaters is not used, but kept it for consistency of the package
 
 """
 struct GarchSeqToOneTDist{T,F,D<:Distributions.Distribution} <: BNNLikelihood

@@ -116,7 +116,7 @@ end
 # Calculate MAP Estimation
 function calculate_map_estimation(bnn, X_train)
     opt = FluxModeFinder(bnn, Flux.RMSProp())
-    θmap = find_mode(bnn, 10, 5000, opt)
+    θmap = find_mode(bnn, 10, 1000, opt)
     nethat = bnn.like.nc(θmap)
     parameters = [nethat(xx) for xx in eachslice(X_train; dims =1 )][end]
     μ_hat = parameters[1, :]
@@ -696,15 +696,21 @@ end
 
 #################### Run Main Function ####################
 
-train_index = 110:2100
-val_index = 2101:2300
-test_index = 2301:2500
+train_index = 110:3450
+val_index = 3451:3700
+test_index = 3701:3950
 degrees_f = Float32(5)  # Degrees of freedom, replace ... with the actual value.
 quantiles = Float32.([0.01,0.05,0.1])
-lag = 10
+lag = 5
 
 #network structures
 network_structures = [
+
+
+    Flux.Chain(RNN(30, 30), Dense(2, 2)), 
+
+
+
     Flux.Chain(RNN(30, 2), Dense(2, 2)), 
     Flux.Chain(RNN(30, 4), Dense(4, 2)), 
     Flux.Chain(RNN(30, 6), Dense(6, 2)), 
@@ -719,8 +725,8 @@ network_structures = [
     Flux.Chain(LSTM(30, 10), Dense(10, 2)), 
     Flux.Chain(LSTM(30, 2), Dense(2, 2, sigmoid), Dense(2, 2)), 
     Flux.Chain(LSTM(30, 6), Dense(6, 6, sigmoid), Dense(6, 2)), 
-    Flux.Chain(LSTM(30, 5), Dense(5, 5, relu), Dense(5, 2)), 
-    Flux.Chain(LSTM(30, 10), Dense(10, 10, relu), Dense(10, 2)), 
+    Flux.Chain(LSTM(30, 2), Dense(2, 2, relu), Dense(2, 2)), 
+    Flux.Chain(LSTM(30, 6), Dense(6, 6, relu), Dense(6, 2)), 
 ]
 
 #run main function 

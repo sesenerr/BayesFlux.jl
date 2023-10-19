@@ -19,9 +19,9 @@ end
 
 # Preprocess data
 # Scaling the input data 
-function preprocess_data_portfolio(data, train_index, val_index, test_index)
+function preprocess_data_portfolio(lag, data, train_index, val_index, test_index)
     # Convert DataFrame to Matrix
-    matrix_data = Matrix(raw_data)
+    matrix_data = Matrix(data)
     matrix_data = Matrix{Float32}(matrix_data[:,2:31])
     
     # Calculate row-wise mean of assets / first raw needs to be = -.009415702
@@ -109,7 +109,7 @@ end
 # Calculate MAP Estimation
 function calculate_map_estimation(bnn, x_train)
     opt = FluxModeFinder(bnn, Flux.RMSProp())
-    θmap = find_mode(bnn, 10, 5000, opt)
+    θmap = find_mode(bnn, 10, 1000, opt)
     nethat = bnn.like.nc(θmap)
     parameters = [nethat(xx) for xx in eachslice(x_train; dims =1 )][end]
     μ_hat = parameters[1, :]
@@ -711,12 +711,12 @@ end
 file_path = "src/data/etfReturns.csv"
 raw_data = load_data_portfolio(file_path)
 
-train_index = 110:2100
-val_index = 2101:2300
-test_index = 2301:2500
-degrees_f = Float32(5)  # Degrees of freedom, replace ... with the actual value.
+train_index = 110:3450
+val_index = 3451:3700
+test_index = 3701:3950
+degrees_f = Float32(5)  # Degrees of freedom,
 quantiles = Float32.([0.01,0.05,0.1])
-lag = 10
+lag = 5
 
 #network structures
 network_structures = [
@@ -734,8 +734,8 @@ network_structures = [
     Flux.Chain(LSTM(1, 10), Dense(10, 2)), 
     Flux.Chain(LSTM(1, 2), Dense(2, 2, sigmoid), Dense(2, 2)), 
     Flux.Chain(LSTM(1, 6), Dense(6, 6, sigmoid), Dense(6, 2)), 
-    Flux.Chain(LSTM(1, 5), Dense(5, 5, relu), Dense(5, 2)), 
-    Flux.Chain(LSTM(1, 10), Dense(10, 10, relu), Dense(10, 2)), 
+    Flux.Chain(LSTM(1, 2), Dense(2, 2, relu), Dense(2, 2)), 
+    Flux.Chain(LSTM(1, 6), Dense(6, 6, relu), Dense(6, 2)), 
 ]
 
 #run main function 
@@ -753,16 +753,26 @@ end
 #     backtest_and_save_to_excel(net, train_index, val_index, test_index, degrees_f, quantiles,lag)
 # end
 
+#########  SAVE FOR OVERSIGHT ##### just change the y_train, y_val and y_test and replace the y_full = x_full 
+lag = 10
+#load data
+file_path = "src/data/etfReturns.csv"
+raw_data = load_data_portfolio(file_path)
+#data processing
+x_train, y_train, y_val, y_test, y_full, data, df_train_index, df_validation_index, df_test_index = preprocess_data_portfolio(lag, raw_data, train_index, val_index, test_index)
+#t_dist quantile
+y_full
+#900-3500
+#3500-3700
+#3700-3900
+y_train
+y_val
+y_test
 
 
-
-
-
-
-
-
-
-
+df_train_index
+df_validation_index
+df_test_index
 
 
 
@@ -823,3 +833,108 @@ end
 # raw_data[110,1]
 
 # selectmodel(GARCH, y_train; criterion=bic, maxlags=4, dist=StdT)
+
+
+
+
+    # Convert DataFrame to Matrix
+    matrix_data = Matrix(raw_data)
+    matrix_data = Matrix{Float32}(matrix_data[:,2:31])
+    
+    # Calculate row-wise mean of assets / first raw needs to be = -.009415702
+    portfolio = mean(matrix_data, dims=2)
+    portfolio
+    percantage_portfolio = portfolio .* 100 
+    #------
+    # #Scaling the input data 
+    # # Get the mean and standard deviation of each column
+    # scaled_train_index = train_index .- minimum(train_index) .+ 1
+    # scaled_val_index = val_index .- minimum(train_index) .+ 1
+    # scaled_test_index = test_index .- minimum(train_index) .+ 1
+    # scaled_full_index = (minimum(train_index):maximum(test_index)) .- minimum(train_index) .+ 1
+
+    # means = mean(portfolio[train_index])
+    # stddevs = std(portfolio[train_index])
+    # # Normalize the columns by subtracting the mean and dividing by the standard deviation
+    # portfolio = (portfolio .- means) ./ stddevs
+
+
+
+
+
+
+
+
+df_full = (minimum(train_index):maximum(test_index))[(lag + 1):end]
+
+
+p = plot(raw_data[df_full,:Date], percantage_portfolio[df_full],
+title = "Portfolio Return",
+xlab = "Date",
+ylab = "returns",
+legend = false,
+linewidth = 2,
+linecolor = :blue)
+
+date1 = raw_data[minimum(val_index),:Date]
+date2 = raw_data[minimum(test_index),:Date]
+
+plot!(p, [date1, date1], [minimum(percantage_portfolio[df_full]), maximum(percantage_portfolio[df_full])], line=:dash, linewidth=2, linecolor=:red)
+plot!(p, [date2, date2], [minimum(percantage_portfolio[df_full]), maximum(percantage_portfolio[df_full])], line=:dash, linewidth=2, linecolor=:red)
+
+savefig(p, "full_data")
+
+train_index = 1:2100
+val_index = 2101:2300
+test_index = 2301:4280
+1800-3500-3700
+
+
+raw_data[minimum(train_index),:Date]
+raw_data[minimum(val_index),:Date]
+raw_data[minimum(test_index),:Date]
+
+df_full
+raw_data[df_full]
+portfolio[df_full]
+
+mean_value = mean(percantage_portfolio)       # Mean
+median_value = median(percantage_portfolio)   # Median
+std_deviation = std(percantage_portfolio)     # Standard Deviation
+variance = var(percantage_portfolio)          # Variance
+minimum_value = minimum(percantage_portfolio) # Minimum
+maximum_value = maximum(percantage_portfolio) # Maximum
+
+raw_data[3950,:Date]
+portfolio[109]
+portfolio[3450]
+portfolio[3700]
+
+
+
+
+using StatsBase
+
+percantage_portfolio
+percantage_portfolio = vec(percantage_portfolio)
+
+# Calculate various tail quantiles
+q_1 = quantile(percantage_portfolio, 0.01)
+q_5 = quantile(percantage_portfolio, 0.05)
+q_25 = quantile(percantage_portfolio, 0.25)
+q_75 = quantile(percantage_portfolio, 0.75)
+q_95 = quantile(percantage_portfolio, 0.95)
+q_99 = quantile(percantage_portfolio, 0.99)
+# Calculate skewness and kurtosis
+skew = skewness(percantage_portfolio)
+kurt = kurtosis(percantage_portfolio)
+
+# Display the results
+println("1th percentile: $q_1")
+println("5th percentile: $q_5")
+println("25th percentile: $q_25")
+println("75th percentile: $q_75")
+println("95th percentile: $q_95")
+println("99th percentile: $q_99")
+println("Skewness: $skew")
+println("Kurtosis: $kurt")
