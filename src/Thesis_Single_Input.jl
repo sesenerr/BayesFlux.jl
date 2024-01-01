@@ -1,11 +1,20 @@
+##########################  Single Input  ############################
+
+# This Julia script is designed for backtesting Bayesian neural network models on ETF return data. 
+# It includes functions for data loading, preprocessing, model building, and Bayesian inference. 
+# The script focuses on estimating and comparing value at risk (VaR) using different methodologies like GARCH, MAP, BNN, and BBB. 
+# It assesses model performance through RMSE calculations and quantile comparison plots, 
+# and consolidates the results into an Excel file for comprehensive analysis. 
+# This is particularly useful for financial risk analysis and predictions using advanced statistical and machine learning methods.
+
+#*** Ensure that all the necessary functions are executed before running the code in the 'Run Main Function' section.
+
 include("BayesFlux.jl")
-include("var_backtest.jl")
+include("Thesis_Var_Backtest.jl")
 using Random, Distributions, LinearAlgebra, Plots
 using MCMCChains, Bijectors, Statistics, Flux, StatsBase
 using .BayesFlux, ARCHModels 
 using CSV,DataFrames,ExcelFiles,Plots,XLSX,Dates, DataStructures
-
-#should I keep normilized return or normal return in data frame?? change in preprocess_data_portfolio funtion
 
 
 # Load data
@@ -19,18 +28,17 @@ function load_data_portfolio(file_path)
     return data
 end
 
-#the returns in data frame are not scaled here ******
 # Preprocess data
 # Scaling the input data 
-function preprocess_data_portfolio_multi(data, train_index, val_index, test_index)
+function preprocess_data_portfolio(lag, data, train_index, val_index, test_index)
     # Convert DataFrame to Matrix
     matrix_data = Matrix(data)
     matrix_data = Matrix{Float32}(matrix_data[:,2:31])
+    
     # Calculate row-wise mean of assets / first raw needs to be = -.009415702
     portfolio = mean(matrix_data, dims=2)
-
-    X = hcat(portfolio, matrix_data)
-
+    portfolio
+    #------
     #Scaling the input data 
     # Get the mean and standard deviation of each column
     scaled_train_index = train_index .- minimum(train_index) .+ 1
@@ -38,24 +46,23 @@ function preprocess_data_portfolio_multi(data, train_index, val_index, test_inde
     scaled_test_index = test_index .- minimum(train_index) .+ 1
     scaled_full_index = (minimum(train_index):maximum(test_index)) .- minimum(train_index) .+ 1
 
-
-    means = mean(X[train_index,:], dims=1)
-    stddevs = std(X[train_index,:], dims=1)
-
+    means = mean(portfolio[train_index])
+    stddevs = std(portfolio[train_index])
     # Normalize the columns by subtracting the mean and dividing by the standard deviation
-    X = (X .- means) ./ stddevs
+    portfolio = (portfolio .- means) ./ stddevs
     #------
-    # Create portfolio matrix
 
+    # Create portfolio matrix
+    
     full_index = minimum(train_index):maximum(test_index)
     portfolio = portfolio[full_index]
-
-    #first 5 observation will be lost
-    data = DataFrame( Returns = portfolio[(lag+1):end]) # X[(lag+1):end,1]
+    
+    #first 5 observation will be missed
+    data = DataFrame( Returns = portfolio[(lag + 1):end])
 
     data[!, :MAP_μ] = fill(Float64(1), size(data,1))
     data[!, :MAP_σ] = fill(Float64(1), size(data,1))
-
+    
     data[!, :BNN_Mean_μ] = fill(Float64(2), size(data,1))
     data[!, :BNN_Mean_σ] = fill(Float64(2), size(data,1))
 
@@ -71,23 +78,20 @@ function preprocess_data_portfolio_multi(data, train_index, val_index, test_inde
     data[!, :Garch_μ] = fill(Float64(6), size(data,1))
     data[!, :Garch_σ] = fill(Float64(6), size(data,1))
 
-
     df_train_index = (train_index .- minimum(train_index) .+ 1)[1:end-lag]
     df_validation_index = val_index .- minimum(val_index) .+ 1 .+ maximum(df_train_index)
     df_test_index = test_index .- minimum(test_index) .+ 1 .+ maximum(df_validation_index)
 
-    X = X[full_index,:]
-    y = X[:,1]
+    y = portfolio 
 
-    X_train, y_train, y_val, y_test = X[scaled_train_index,:], y[scaled_train_index], y[scaled_val_index], y[scaled_test_index]
-    X_full, y_full = X[scaled_full_index,:], y[scaled_full_index]
-
-    X_train = make_rnn_tensor(X_train, lag + 1)
-    y_train = vec(X_train[end, 1, :])
-    X_train = X_train[1:end-1, 2:end, :]
+    y_train, y_val, y_test, y_full = y[scaled_train_index], y[scaled_val_index], y[scaled_test_index], y[scaled_full_index]
+    
+    #arrange a train set for NN
+    x_train = make_rnn_tensor(reshape(y_train, :, 1), lag + 1)
+    y_train = vec(x_train[end, :, :])
+    x_train = x_train[1:end-1, :, :]
         
-    return X_train, y_train, y_val, y_test, X_full, y_full, data, df_train_index,df_validation_index, df_test_index
-
+    return x_train, y_train, y_val, y_test, y_full, data, df_train_index, df_validation_index, df_test_index
 end
 
 # Calculate Quantile
@@ -95,6 +99,12 @@ function calculate_quantile(degrees_f, quantiles)
     t_dist = TDist(degrees_f)
     quant = quantile(t_dist, quantiles)
     return quant
+end
+
+#get bnn
+function get_bnn_data(net::Flux.Chain{T},x_train, y_train, degrees_f) where {T}
+    bnn = get_bnn(net, x_train,(y_train),degrees_f)
+    return bnn
 end
 
 # Get Bnn
@@ -107,18 +117,12 @@ function get_bnn(net::Flux.Chain{T},x, y,df) where {T}
     return bnn
 end
 
-#get bnn
-function get_bnn_data(net::Flux.Chain{T},X_train::Array{Float32, 3}, y_train, degrees_f) where {T}
-    bnn = get_bnn(net, X_train,(y_train),degrees_f)
-    return bnn
-end
-
 # Calculate MAP Estimation
-function calculate_map_estimation(bnn, X_train)
+function calculate_map_estimation(bnn, x_train)
     opt = FluxModeFinder(bnn, Flux.RMSProp())
     θmap = find_mode(bnn, 10, 1000, opt)
     nethat = bnn.like.nc(θmap)
-    parameters = [nethat(xx) for xx in eachslice(X_train; dims =1 )][end]
+    parameters = [nethat(xx) for xx in eachslice(x_train; dims =1 )][end]
     μ_hat = parameters[1, :]
     log_σ = parameters[2, :]
     σ_hat = exp.(log_σ)
@@ -131,8 +135,8 @@ function calculate_test_map_estimation(bnn, train_index,val_index, test_index, �
     return μ_hat_val, σ_hat_val, μ_hat_test, σ_hat_test
 end
 
-# Function to estimate σs for BNN
-function get_bnn_predictions(bnn, θmap, X_full::Array{Float32, 2}, train_index,val_index, test_index)
+ # Function to estimate σs for BNN
+ function get_bnn_predictions(bnn, θmap, y_full::Array{Float32, 1}, train_index,val_index, test_index, quant)
 
     sampler = SGNHTS(1f-2, 1f0; xi = 1f0^1, μ = 1f0)
 
@@ -147,13 +151,15 @@ function get_bnn_predictions(bnn, θmap, X_full::Array{Float32, 2}, train_index,
     #VaRs_bnn = bnn_var_prediction(μhats,σhats,quant)
 
     # Test set estimation - optimized
-    μhats_validation, σhats_validation , μhats_test, σhats_test = naive_test_bnn_σ_prediction_recurrent(bnn, X_full, train_index, val_index, test_index,ch)
+    μhats_validation, σhats_validation , μhats_test, σhats_test = naive_test_bnn_σ_prediction_recurrent(bnn, y_full, train_index, val_index, test_index,ch)
+    #VaRs_validation_bnn = bnn_var_prediction(μhats_validation,σhats_validation,quant)
+    #VaRs_test_bnn = bnn_var_prediction(μhats_test,σhats_test,quant)
 
     return ch, μhats, σhats, μhats_validation, σhats_validation , μhats_test, σhats_test
 end
 
 # Function to estimate σs for BBB
-function get_bbb_predictions(bnn, X_full::Array{Float32, 2}, train_index, val_index, test_index)
+function get_bbb_predictions(bnn, y_full::Array{Float32, 1}, train_index, val_index, test_index, quant)
     
     q, params, losses = bbb(bnn, 10, 2_000; mc_samples = 1, opt = Flux.RMSProp(), n_samples_convergence = 10)
 
@@ -164,45 +170,31 @@ function get_bbb_predictions(bnn, X_full::Array{Float32, 2}, train_index, val_in
     #VaRs_bbb = bnn_var_prediction(μhats_bbb, σhats_bbb, quant)
 
     # Test set estimation - computationally expensive
-    μhats_validation_bbb, σhats_validation_bbb , μhats_test_bbb, σhats_test_bbb = naive_test_bnn_σ_prediction_recurrent(bnn, X_full, train_index, val_index, test_index,ch_bbb)
+    μhats_validation_bbb, σhats_validation_bbb , μhats_test_bbb, σhats_test_bbb = naive_test_bnn_σ_prediction_recurrent(bnn, y_full, train_index, val_index, test_index,ch_bbb)
+    #VaRs_validation_bbb = bnn_var_prediction(μhats_validation_bbb, σhats_validation_bbb,quant)
+    #VaRs_test_bbb = bnn_var_prediction(μhats_test_bbb, σhats_test_bbb, quant)
 
     return ch_bbb, μhats_bbb, σhats_bbb, μhats_validation_bbb, σhats_validation_bbb, μhats_test_bbb, σhats_test_bbb
 end
 
-# Function to create RMSE DataFrame
-function create_rmse_dataframe(rmse_values, methods, datasets)
-    train_rmse = [rmse_values[(method, "train")] for method in methods]
-    val_rmse = [rmse_values[(method, "validation")] for method in methods]
-    test_rmse = [rmse_values[(method, "test")] for method in methods]
-
-    df_rmse = DataFrame(
-        Method = methods,
-        Train = train_rmse,
-        Validation = val_rmse,
-        Test = test_rmse
-    )
-    
-    return df_rmse
-end
-
-function save_qq_plot(train_index, val_index, test_index, X_full, y_train, y_val, y_test, bnn, ch, ch_bbb, new_dir)
+function save_qq_plot(train_index, val_index, test_index, y_full, y_train, y_val, y_test, bnn, ch, ch_bbb, new_dir)
 
     # Shift the train index
     train_index = train_index .- minimum(train_index) .+ 1
     shifted_index = train_index[:] .+ length(val_index) .+ length(test_index)
 
     # Make RNN tensor
-    X_shifted = make_rnn_tensor(X_full[shifted_index,:], lag + 1)
-    X_shifted = X_shifted[1:end-1, 2:end, :]
+    x_shifted = make_rnn_tensor(reshape(y_full[shifted_index], :, 1), lag + 1)
+    x_shifted = x_shifted[1:end-1, :, :]
 
     # Sample from the posterior predictive distribution
     posterior_y_train = sample_posterior_predict(bnn, ch)    
-    posterior_y_shift = sample_posterior_predict(bnn, ch; x = X_shifted)
+    posterior_y_shift = sample_posterior_predict(bnn, ch; x = x_shifted)
     posterior_y_val = posterior_y_shift[end-length(test_index)-(length(val_index)-1):end-length(test_index),:]
     posterior_y_test = posterior_y_shift[end-(length(test_index)-1):end,:]
 
     posterior_bbb_y_train = sample_posterior_predict(bnn, ch_bbb)
-    posterior_bbb_y_shift = sample_posterior_predict(bnn, ch_bbb; x = X_shifted)
+    posterior_bbb_y_shift = sample_posterior_predict(bnn, ch_bbb; x = x_shifted)
     posterior_bbb_y_val = posterior_bbb_y_shift[end-length(test_index)-(length(val_index)-1):end-length(test_index),:]
     posterior_bbb_y_test = posterior_bbb_y_shift[end-(length(test_index)-1):end,:]
 
@@ -232,19 +224,6 @@ function save_qq_plot(train_index, val_index, test_index, X_full, y_train, y_val
     savefig(p, plotfile_posterior_bbb_y_test)
 end
 
-function create_and_concatenate_dfs(y_dict, VaRs_dict, quantiles)
-    df_list = []
-    for key in keys(y_dict)
-        risk = VaR(y_dict[key], VaRs_dict[key], quantiles)
-        df = convert_dict_to_df_with_name(risk, key)
-        push!(df_list, df)
-    end
-    
-    combined_df = vcat(df_list...)
-    
-    return combined_df
-end
-
 function plot_and_save(y_values, VaRs, title, filename, new_dir, label="5% VaR")
     plot(1:length(y_values), y_values, label="Returns", title=title)
     plot!(1:length(y_values), VaRs, label=label)
@@ -254,7 +233,7 @@ end
 
 function plot_and_save_combined(data_frame, raw_data, train_index, test_index, val_index, new_dir, plot_types, plot_titles, ylabels)
     plots = []
-    df_full = (minimum(train_index):maximum(test_index))[(lag+1):end]
+    df_full = (minimum(train_index):maximum(test_index))[(lag + 1):end]
     
     for i in 1:length(plot_types)
         p = plot(raw_data[df_full,:Date], data_frame[:, Symbol(plot_types[i])],
@@ -285,6 +264,7 @@ end
 #######                                       Helper Functions                                   #########
 ####### -----------------------------------------------------------------------------------------#########
 
+
 function replace_missing_with_mean(data)
     for col in names(data)
         if eltype(data[!, col]) <: Union{Real, Missing}  # Only process numerical columns
@@ -294,23 +274,6 @@ function replace_missing_with_mean(data)
         end
     end
     return data
-end
-
-# Function to estimate σ for MAP validation and test set estimation for multi input model
-function estimate_test_σ(bnn, train_index, val_index, test_index, θmap, X_full::Array{Float32, 2})
-    train_index = train_index .- minimum(train_index) .+ 1
-    nethat = bnn.like.nc(θmap)
-    shifted_index = train_index[:] .+ length(val_index) .+ length(test_index)
-    
-    X_shifted = make_rnn_tensor(X_full[shifted_index,:], lag + 1)
-    X_shifted = X_shifted[1:end-1, 2:end, :]
-    
-    parameters_whole = [nethat(xx) for xx in eachslice(X_shifted; dims =1 )][end]
-    μ_whole = parameters_whole[1, :]
-    log_σ_whole = parameters_whole[2, :]
-    
-    σ_hat_test = exp.(log_σ_whole)
-    return  μ_whole[end-length(test_index)-(length(val_index)-1):end-length(test_index)], σ_hat_test[end-length(test_index)-(length(val_index)-1):end-length(test_index)],μ_whole[end-(length(test_index)-1):end], σ_hat_test[end-(length(test_index)-1):end]
 end
 
 # Function to create BNN Var predictions for mean and median 
@@ -335,6 +298,21 @@ function bnn_var_prediction(μhats, σhats, quant) where {T}
     return Float32.(μhats .+ result)
 end
 
+# Function to estimate σ for MAP validation and test set estimation for multi input model
+function estimate_test_σ(bnn, train_index, val_index, test_index, θmap, y_full::Array{Float32, 1})
+    train_index = train_index .- minimum(train_index) .+ 1
+    nethat = bnn.like.nc(θmap)
+    shifted_index = train_index[:] .+ length(val_index) .+ length(test_index)
+    x_shifted = make_rnn_tensor(reshape(y_full[shifted_index], :, 1), lag + 1)
+    x_shifted = x_shifted[1:end-1, :, :]
+    parameters_whole = [nethat(xx) for xx in eachslice(x_shifted; dims =1 )][end]
+    μ_whole = parameters_whole[1, :]
+    log_σ_whole = parameters_whole[2, :]
+    σ_hat_test = exp.(log_σ_whole)
+    return  μ_whole[end-length(test_index)-(length(val_index)-1):end-length(test_index)], σ_hat_test[end-length(test_index)-(length(val_index)-1):end-length(test_index)],μ_whole[end-(length(test_index)-1):end], σ_hat_test[end-(length(test_index)-1):end]
+end
+
+
 # Function to estimate BNN train set σ estimation
 function naive_train_bnn_σ_prediction_recurrent(bnn, draws::Array{T, 2}; x = bnn.x, y = bnn.y) where {T}
     μhats = Array{T, 2}(undef, length(y), size(draws, 2))
@@ -350,23 +328,37 @@ function naive_train_bnn_σ_prediction_recurrent(bnn, draws::Array{T, 2}; x = bn
 end
 
 # Function to estimate σ for BNN/BBB validation and test set estimation for multi input model
-function naive_test_bnn_σ_prediction_recurrent(bnn,X_full::Array{Float32, 2},train_index, val_index, test_index, draws::Array{T, 2}) where {T}
+function naive_test_bnn_σ_prediction_recurrent(bnn,y_full::Array{Float32, 1},train_index, val_index, test_index, draws::Array{T, 2}) where {T}
     μ_whole = Array{T, 2}(undef, length(train_index)-lag, size(draws, 2))
     log_σ_whole = Array{T, 2}(undef, length(train_index)-lag, size(draws, 2))
     train_index = train_index .- minimum(train_index) .+ 1
+    
     shifted_index = train_index[:] .+ length(val_index) .+ length(test_index)
-    
-    X_shifted = make_rnn_tensor(X_full[shifted_index,:], lag + 1)
-    X_shifted = X_shifted[1:end-1, 2:end, :]
-    
+    x_shifted = make_rnn_tensor(reshape(y_full[shifted_index], :, 1), lag + 1)
+    x_shifted = x_shifted[1:end-1, :, :]
     Threads.@threads for j=1:size(draws, 2)
         nethat = bnn.like.nc(draws[:, j])
-        parameters_whole = [nethat(xx) for xx in eachslice(X_shifted; dims =1 )][end]
+        parameters_whole = [nethat(xx) for xx in eachslice(x_shifted; dims =1 )][end]
         μ_whole[:,j] = parameters_whole[1, :]
         log_σ_whole[:,j] = parameters_whole[2, :]
         end
     σhats = exp.(log_σ_whole)
     return  μ_whole[end-length(test_index)-(length(val_index)-1):end-length(test_index),:], σhats[end-length(test_index)-(length(val_index)-1):end-length(test_index),:],μ_whole[end-(length(test_index)-1):end,:], σhats[end-(length(test_index)-1):end,:]
+end
+
+# Function to plot calibration for BNN/BBB
+function plot_quantile_comparison(y, posterior_yhat, target_q = 0.05:0.05:0.95)
+    observed_q = get_observed_quantiles(y, posterior_yhat, target_q)
+    plot(target_q, observed_q, label = "Observed", legend_position = :topleft, xlab = "Quantile of Posterior Draws", ylab = "Percent Observations below")
+    plot!(x -> x, minimum(target_q), maximum(target_q), label = "Theoretical")
+end
+
+# Function to get observed quantiles for BNN/BBB
+function get_observed_quantiles(y, posterior_yhat, target_q = 0.05:0.05:0.95)
+    qs = [quantile(yr, target_q) for yr in eachrow(posterior_yhat)]
+    qs = reduce(hcat, qs)
+    observed_q = mean(reshape(y, 1, :) .< qs; dims = 2)
+    return observed_q
 end
 
 # Update DataFrame
@@ -412,6 +404,13 @@ function update_dataframe(df, df_train_index,df_validation_index, df_test_index,
     df[:, :"Garch_σ"] = convert(Vector{Float64}, garch_σ)
     return df
 end
+ 
+function calc_mean_median(mat)
+    mean_vec = mean(mat, dims=2)
+    median_vec = median(mat, dims=2)
+
+    return vec(mean_vec), vec(median_vec)
+end
 
 # Function to estimate GARCH volatility
 function fittedVol(L, w_hat, a_hat, b_hat)
@@ -423,13 +422,6 @@ function fittedVol(L, w_hat, a_hat, b_hat)
     return sqrt.(sigmaHead)
 end
 
-function calc_mean_median(mat)
-    mean_vec = mean(mat, dims=2)
-    median_vec = median(mat, dims=2)
-
-    return vec(mean_vec), vec(median_vec)
-end
-    
 # Function to calculate RMSE 
 function calc_rmse(df, indices, proxy_vol, predict_vals)
     rmse = Dict()
@@ -441,6 +433,22 @@ function calc_rmse(df, indices, proxy_vol, predict_vals)
     end
     
     return rmse
+end
+
+# Function to create RMSE DataFrame
+function create_rmse_dataframe(rmse_values, methods, datasets)
+    train_rmse = [rmse_values[(method, "train")] for method in methods]
+    val_rmse = [rmse_values[(method, "validation")] for method in methods]
+    test_rmse = [rmse_values[(method, "test")] for method in methods]
+
+    df_rmse = DataFrame(
+        Method = methods,
+        Train = train_rmse,
+        Validation = val_rmse,
+        Test = test_rmse
+    )
+    
+    return df_rmse
 end
 
 #convert dictionary to DataFrame 
@@ -472,6 +480,19 @@ function convert_dict_to_df_with_name(dict, name)
     return df
 end
 
+function create_and_concatenate_dfs(y_dict, VaRs_dict, quantiles)
+    df_list = []
+    for key in keys(y_dict)
+        risk = VaR(y_dict[key], VaRs_dict[key], quantiles)
+        df = convert_dict_to_df_with_name(risk, key)
+        push!(df_list, df)
+    end
+    
+    combined_df = vcat(df_list...)
+    
+    return combined_df
+end
+
 # Function to convert all Float32 columns to Float64 in a DataFrame
 function convert_float32_to_float64!(df::DataFrame)
     for col in names(df)
@@ -482,40 +503,23 @@ function convert_float32_to_float64!(df::DataFrame)
     return df
 end
 
-# Function to plot calibration for BNN/BBB
-function plot_quantile_comparison(y, posterior_yhat, target_q = 0.05:0.05:0.95)
-    observed_q = get_observed_quantiles(y, posterior_yhat, target_q)
-    plot(target_q, observed_q, label = "Observed", legend_position = :topleft, xlab = "Quantile of Posterior Draws", ylab = "Percent Observations below")
-    plot!(x -> x, minimum(target_q), maximum(target_q), label = "Theoretical")
-end
+####### ------------------------------------------------------------------------------#########
+#######                               Main Function                                   #########
+####### ------------------------------------------------------------------------------#########
 
-# Function to get observed quantiles for BNN/BBB
-function get_observed_quantiles(y, posterior_yhat, target_q = 0.05:0.05:0.95)
-    qs = [quantile(yr, target_q) for yr in eachrow(posterior_yhat)]
-    qs = reduce(hcat, qs)
-    observed_q = mean(reshape(y, 1, :) .< qs; dims = 2)
-    return observed_q
-end
-
-#####################  Main Funtion   ###################
-
-function backtest_and_save_to_excel_multi(
+function backtest_and_save_to_excel(
     net::Flux.Chain{T},
     train_index::UnitRange{Int},
     val_index::UnitRange{Int},
     test_index::UnitRange{Int},
     degrees_f::Float32,
-    quantiles::Vector{Float32}
+    quantiles::Vector{Float32},
+    lag
 ) where {T}
 
     # Specify the directory you want to create
-    new_dir = "VaR_Multi_$net"
-    
-    
-    # new_dir = "VaR_Multi"
-    # net =  network_structures[1]
-    
-    
+    new_dir = "VaR_Single_$net"
+
     # Create the directory
     if !isdir(new_dir)
     mkdir(new_dir)
@@ -525,7 +529,7 @@ function backtest_and_save_to_excel_multi(
     file_path = "src/data/etfReturns.csv"
     raw_data = load_data_portfolio(file_path)
     #data processing
-    X_train, y_train, y_val, y_test, X_full, y_full, data, df_train_index,df_validation_index, df_test_index = preprocess_data_portfolio_multi(raw_data, train_index, val_index, test_index)
+    x_train, y_train, y_val, y_test, y_full, data, df_train_index, df_validation_index, df_test_index = preprocess_data_portfolio(raw_data, train_index, val_index, test_index)
     #t_dist quantile
     quant = calculate_quantile(degrees_f, quantiles)
 
@@ -535,23 +539,23 @@ function backtest_and_save_to_excel_multi(
     am = fit(GARCH{1, 1}, y_train,dist=StdT);
     # Now we can get the coefficients
     coefficients = coef.(am)
-    garch_σ = fittedVol(y_full, coefficients[1], coefficients[2], coefficients[3])[(lag+1):end]
+    garch_σ = fittedVol(y_full, coefficients[1], coefficients[2], coefficients[3])[(lag + 1):end]
     garch_μ = coefficients[5]
     # σ^2 as a proxy
-    proxy_vol_2 = y_full[(lag+1):end].^2
+    proxy_vol_2 = y_full[(lag + 1):end].^2
 
     #construct bnn
-    bnn = get_bnn_data(net,X_train, y_train, degrees_f)
+    bnn = get_bnn_data(net,x_train, y_train, degrees_f)
     #Map estimated network parameters and network ouptputs at training set
-    θmap, μ_hat, σ_hat = calculate_map_estimation(bnn, X_train)
+    θmap, μ_hat, σ_hat = calculate_map_estimation(bnn, x_train)
     #Map estimation network parameters and network ouptputs at validation and test sets
-    μ_hat_val, σ_hat_val, μ_hat_test, σ_hat_test = calculate_test_map_estimation(bnn, train_index, val_index, test_index, θmap, X_full)
+    μ_hat_val, σ_hat_val, μ_hat_test, σ_hat_test = calculate_test_map_estimation(bnn, train_index, val_index, test_index, θmap, y_full)
 
     #Bnn estimated network parameters and network ouptputs for all sets   
-    ch, μhats, σhats, μhats_validation, σhats_validation , μhats_test, σhats_test = get_bnn_predictions(bnn, θmap, X_full, train_index, val_index, test_index)
+    ch, μhats, σhats, μhats_validation, σhats_validation , μhats_test, σhats_test = get_bnn_predictions(bnn, θmap, y_full, train_index, val_index, test_index, quant)
  
     #Bbb estimated network parameters and network ouptputs for all sets   
-    ch_bbb, μhats_bbb, σhats_bbb, μhats_validation_bbb, σhats_validation_bbb, μhats_test_bbb, σhats_test_bbb = get_bbb_predictions(bnn, X_full, train_index,val_index, test_index)
+    ch_bbb, μhats_bbb, σhats_bbb, μhats_validation_bbb, σhats_validation_bbb, μhats_test_bbb, σhats_test_bbb = get_bbb_predictions(bnn, y_full, train_index,val_index, test_index, quant)
 
     #Store the μ and σ estimations of the t distribution using GARCH,MAP,BNN,BBB
     df = update_dataframe(data, df_train_index,df_validation_index, df_test_index, μ_hat, σ_hat, μ_hat_val, σ_hat_val, μ_hat_test, σ_hat_test,μhats, σhats, μhats_validation, σhats_validation , μhats_test, σhats_test,μhats_bbb, σhats_bbb, μhats_validation_bbb, σhats_validation_bbb, μhats_test_bbb, σhats_test_bbb,garch_μ, garch_σ)
@@ -572,9 +576,9 @@ function backtest_and_save_to_excel_multi(
     datasets = ["train", "validation", "test"]
 
     df_rmse = create_rmse_dataframe(rmse_values, methods, datasets)
-
+    
     ##### Save QQ plots
-    save_qq_plot(train_index, val_index, test_index, X_full, y_train, y_val, y_test, bnn, ch, ch_bbb, new_dir)
+    save_qq_plot(train_index, val_index, test_index, y_full, y_train, y_val, y_test, bnn, ch, ch_bbb, new_dir)
 
     ##### VaR calculations for 1%, 5% and 10% level for all estimation methods
     VaRs_Garch = bnn_var_prediction(coefficients[5], garch_σ, quant)
@@ -590,7 +594,6 @@ function backtest_and_save_to_excel_multi(
     VaRs_bbb = bnn_var_prediction(μhats_bbb, σhats_bbb, quant)
     VaRs_validation_bbb = bnn_var_prediction(μhats_validation_bbb, σhats_validation_bbb,quant)
     VaRs_test_bbb = bnn_var_prediction(μhats_test_bbb, σhats_test_bbb, quant)
-
 
     #### get combined_risk_df
     y_dict = OrderedDict(
@@ -636,6 +639,22 @@ function backtest_and_save_to_excel_multi(
     )
 
     combined_risk_df = create_and_concatenate_dfs(y_dict, VaRs_dict, quantiles)
+    
+    # Define model parameters
+    parameters = Dict(
+        "net" => string(net),  # Convert net to a string to store it
+        "train_index" => string(train_index),
+        "validation_index" => string(val_index),
+        "test_index" => string(test_index),
+        "degrees_f" => degrees_f,
+        "quantiles" => join(quantiles, ", "),  # Convert array to a comma-separated string
+        "lag" => lag
+    )
+
+    # Convert the parameters dictionary into a DataFrame
+    parameters_df = DataFrame(parameters)
+    parameters_df = DataFrame([eltype(c) == Float32 ? convert(Vector{Float64}, c) : c for c in eachcol(parameters_df)], names(parameters_df))
+
 
     ##### Plot VaR values with returns to see visually 
     plot_and_save(y_train, VaRs_Garch[df_train_index,2], "GARCH-Driven VaR Assessment on Training Set", "garch_train_plot.png", new_dir)
@@ -666,7 +685,7 @@ function backtest_and_save_to_excel_multi(
         ["Returns", "Garch_σ", "MAP_σ", "BNN_Mean_σ", "BBB_Mean_σ"], 
         ["Return over Time", "Garch-Volatility over Time", "MAP-Volatility over Time", "SGNT-S-Volatility over Time", "BBB-Volatility over Time"], 
         ["Returns", "Volatility", "Volatility", "Volatility", "Volatility"]
-    )    
+    )
 
     # Specify the filename, including the new directory
     filename = joinpath(new_dir, "my_results.xlsx")
@@ -680,76 +699,162 @@ function backtest_and_save_to_excel_multi(
     XLSX.openxlsx(filename, mode="w") do xf
     # Make sure all DataFrames are converted to compatible types here
 
-    sheet1 = XLSX.addsheet!(xf, "Return & Parameter Estimations")
-    XLSX.writetable!(sheet1, Tables.columntable(df))
+    sheet1 = XLSX.addsheet!(xf, "Parameters")
+    XLSX.writetable!(sheet1, Tables.columntable(parameters_df))
 
-    sheet2 = XLSX.addsheet!(xf, "RMSE")
-    XLSX.writetable!(sheet2, Tables.columntable(df_rmse))
+    sheet2 = XLSX.addsheet!(xf, "Return & Parameter Estimations")
+    XLSX.writetable!(sheet2, Tables.columntable(df))
+
+    sheet3 = XLSX.addsheet!(xf, "RMSE")
+    XLSX.writetable!(sheet3, Tables.columntable(df_rmse))
       
-    sheet3 = XLSX.addsheet!(xf, "Risk Metrics")
-    XLSX.writetable!(sheet3, Tables.columntable(combined_risk_df))
+    sheet4 = XLSX.addsheet!(xf, "Risk Metrics")
+    XLSX.writetable!(sheet4, Tables.columntable(combined_risk_df))
 
     # ... repeat for each DataFrame
     end
 
-end
+end   
 
 #################### Run Main Function ####################
+
+#load data
+file_path = "src/data/etfReturns.csv"
+raw_data = load_data_portfolio(file_path)
 
 train_index = 110:3450
 val_index = 3451:3700
 test_index = 3701:3950
-degrees_f = Float32(5)  # Degrees of freedom, replace ... with the actual value.
+degrees_f = Float32(5)  # Degrees of freedom,
 quantiles = Float32.([0.01,0.05,0.1])
 lag = 5
 
 #network structures
 network_structures = [
-
-
-    Flux.Chain(RNN(30, 30), Dense(2, 2)), 
-
-
-
-    Flux.Chain(RNN(30, 2), Dense(2, 2)), 
-    Flux.Chain(RNN(30, 4), Dense(4, 2)), 
-    Flux.Chain(RNN(30, 6), Dense(6, 2)), 
-    Flux.Chain(RNN(30, 10), Dense(10, 2)),
-    Flux.Chain(RNN(30, 2), Dense(2, 2, sigmoid), Dense(2, 2)), 
-    Flux.Chain(RNN(30, 6), Dense(6, 6, sigmoid), Dense(6, 2)), 
-    Flux.Chain(RNN(30, 2), Dense(2, 2, relu), Dense(2, 2)), 
-    Flux.Chain(RNN(30, 6), Dense(6, 6, relu), Dense(6, 2)), 
-    Flux.Chain(LSTM(30, 2), Dense(2, 2)), 
-    Flux.Chain(LSTM(30, 4), Dense(4, 2)), 
-    Flux.Chain(LSTM(30, 6), Dense(6, 2)), 
-    Flux.Chain(LSTM(30, 10), Dense(10, 2)), 
-    Flux.Chain(LSTM(30, 2), Dense(2, 2, sigmoid), Dense(2, 2)), 
-    Flux.Chain(LSTM(30, 6), Dense(6, 6, sigmoid), Dense(6, 2)), 
-    Flux.Chain(LSTM(30, 2), Dense(2, 2, relu), Dense(2, 2)), 
-    Flux.Chain(LSTM(30, 6), Dense(6, 6, relu), Dense(6, 2)), 
+    Flux.Chain(RNN(1, 2), Dense(2, 2)), 
+    Flux.Chain(RNN(1, 4), Dense(4, 2)), 
+    Flux.Chain(RNN(1, 6), Dense(6, 2)), 
+    Flux.Chain(RNN(1, 10), Dense(10, 2)),
+    Flux.Chain(RNN(1, 2), Dense(2, 2, sigmoid), Dense(2, 2)), 
+    Flux.Chain(RNN(1, 6), Dense(6, 6, sigmoid), Dense(6, 2)), 
+    Flux.Chain(RNN(1, 2), Dense(2, 2, relu), Dense(2, 2)), 
+    Flux.Chain(RNN(1, 6), Dense(6, 6, relu), Dense(6, 2)), 
+    Flux.Chain(LSTM(1, 2), Dense(2, 2)), 
+    Flux.Chain(LSTM(1, 4), Dense(4, 2)), 
+    Flux.Chain(LSTM(1, 6), Dense(6, 2)), 
+    Flux.Chain(LSTM(1, 10), Dense(10, 2)), 
+    Flux.Chain(LSTM(1, 2), Dense(2, 2, sigmoid), Dense(2, 2)), 
+    Flux.Chain(LSTM(1, 6), Dense(6, 6, sigmoid), Dense(6, 2)), 
+    Flux.Chain(LSTM(1, 2), Dense(2, 2, relu), Dense(2, 2)), 
+    Flux.Chain(LSTM(1, 6), Dense(6, 6, relu), Dense(6, 2)), 
 ]
 
 #run main function 
 for net in network_structures
     try
-        backtest_and_save_to_excel_multi(net, train_index, val_index, test_index, degrees_f, quantiles)
+        backtest_and_save_to_excel(net, train_index, val_index, test_index, degrees_f, quantiles,lag)
     catch e
         println("An error occurred: ", e)
         continue
     end
 end
 
-#run main function 
-for net in network_structures
-    backtest_and_save_to_excel(net, train_index, val_index, test_index, degrees_f, quantiles)
-end
-
-    #load data
-    file_path = "src/data/etfReturns.csv"
-    raw_data = load_data_portfolio(file_path)
-    #data processing
-    X_train, y_train, y_val, y_test, X_full, y_full, data, df_train_index,df_validation_index, df_test_index = preprocess_data_portfolio_multi(raw_data, train_index, val_index, test_index)
 
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ###### Some additional code after final feedback for better visualizaion purposes#######
+
+
+# df_full = (minimum(train_index):maximum(test_index))[(lag + 1):end]
+
+
+# p = plot(raw_data[df_full,:Date], percantage_portfolio[df_full],
+# title = "Portfolio Return",
+# xlab = "Date",
+# ylab = "returns",
+# legend = false,
+# linewidth = 2,
+# linecolor = :blue)
+
+# date1 = raw_data[minimum(val_index),:Date]
+# date2 = raw_data[minimum(test_index),:Date]
+
+# plot!(p, [date1, date1], [minimum(percantage_portfolio[df_full]), maximum(percantage_portfolio[df_full])], line=:dash, linewidth=2, linecolor=:red)
+# plot!(p, [date2, date2], [minimum(percantage_portfolio[df_full]), maximum(percantage_portfolio[df_full])], line=:dash, linewidth=2, linecolor=:red)
+
+# savefig(p, "full_data")
+
+# train_index = 1:2100
+# val_index = 2101:2300
+# test_index = 2301:4280
+# 1800-3500-3700
+
+
+# raw_data[minimum(train_index),:Date]
+# raw_data[minimum(val_index),:Date]
+# raw_data[minimum(test_index),:Date]
+
+# df_full
+# raw_data[df_full]
+# portfolio[df_full]
+
+# mean_value = mean(percantage_portfolio)       # Mean
+# median_value = median(percantage_portfolio)   # Median
+# std_deviation = std(percantage_portfolio)     # Standard Deviation
+# variance = var(percantage_portfolio)          # Variance
+# minimum_value = minimum(percantage_portfolio) # Minimum
+# maximum_value = maximum(percantage_portfolio) # Maximum
+
+# raw_data[3950,:Date]
+# portfolio[109]
+# portfolio[3450]
+# portfolio[3700]
+
+
+
+
+# using StatsBase
+
+# percantage_portfolio
+# percantage_portfolio = vec(percantage_portfolio)
+
+# # Calculate various tail quantiles
+# q_1 = quantile(percantage_portfolio, 0.01)
+# q_5 = quantile(percantage_portfolio, 0.05)
+# q_25 = quantile(percantage_portfolio, 0.25)
+# q_75 = quantile(percantage_portfolio, 0.75)
+# q_95 = quantile(percantage_portfolio, 0.95)
+# q_99 = quantile(percantage_portfolio, 0.99)
+# # Calculate skewness and kurtosis
+# skew = skewness(percantage_portfolio)
+# kurt = kurtosis(percantage_portfolio)
+
+# # Display the results
+# println("1th percentile: $q_1")
+# println("5th percentile: $q_5")
+# println("25th percentile: $q_25")
+# println("75th percentile: $q_75")
+# println("95th percentile: $q_95")
+# println("99th percentile: $q_99")
+# println("Skewness: $skew")
+# println("Kurtosis: $kurt")

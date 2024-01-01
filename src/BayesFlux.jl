@@ -1,3 +1,13 @@
+# BayesFlux: A Julia module for Bayesian Neural Networks. 
+#It includes various layers (dense, recurrent), model construction and 
+#deconstruction utilities, a range of likelihood functions, network priors, 
+#and initializers. The module also provides core functionalities for BNNs, 
+#mode finding algorithms, tools for Bayesian inference (including MCMC and 
+#Variational Inference methods), and additional utilities, particularly for RNNs.
+#This module is ideal for applications requiring probabilistic modeling and 
+#uncertainty quantification in neural networks.
+
+
 module BayesFlux
 
 include("./utils/gradient_utils.jl")

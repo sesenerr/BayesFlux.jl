@@ -4,8 +4,8 @@ using LinearAlgebra
 ###############################################################################
 # Sequence to one Normal Multiple Output
 ################################################################################
-
-
+#Time varying μ and σ
+######################################################################
 """
     GArchSeqToOneNormal(nc::NetConstructor{T, F}, prior_μ::D) where {T, F, D<:Distribution}
 
@@ -68,7 +68,7 @@ end
 ################################################################################
 
 """
-    SeqToOneTDist(nc::NetConstructor{T, F}, prior_μ::D, ν::T) where {T, F, D}
+GarchSeqToOneTDist(nc::NetConstructor{T, F}, prior_μ::D, ν::T) where {T, F, D}
 
 Use a Student-T likelihood for a Seq-to-One architecture with a multiple(two) outputs
 and known degress of freedom.

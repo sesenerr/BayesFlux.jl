@@ -1,3 +1,17 @@
+#### It is for Machine Learning Paper.
+
+# This Julia script is designed for backtesting investment strategies using ETF market data. It includes:
+# 1. A Portfolio struct to represent an investor's cash and ETF units.
+# 2. The `backtest_strategy` function which simulates the performance of a given trading strategy over a data set. 
+#    It takes market data, initial investment, a strategy function, volatility estimation method, and unit size as inputs.
+# 3. Three trading strategy functions:
+#    - `directional_strategy`: Trades based on changes in volatility, buying or selling units.
+#    - `mean_reversion_strategy`: Buys or sells units based on how current volatility compares to the historical average.
+#    - `hold_strategy`: Buys as many units as possible on the first day and holds them until the end.
+# 4. Each strategy function updates the portfolio based on the current market conditions and the specified trading logic.
+# The script is useful for analyzing and comparing the performance of different trading strategies in a financial context.
+
+
 using CSV, DataFrames
 
 struct Portfolio

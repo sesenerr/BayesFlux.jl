@@ -4,7 +4,7 @@ using LinearAlgebra
 ###############################################################################
 # Sequence to one Normal 
 ################################################################################
-
+#Time varying σ and constant μ
 
 """
     ArchSeqToOneNormal(nc::NetConstructor{T, F}, prior_μ::D) where {T, F, D<:Distribution}
@@ -66,7 +66,7 @@ end
 ################################################################################
 
 """
-    SeqToOneTDist(nc::NetConstructor{T, F}, prior_μ::D, ν::T) where {T, F, D}
+ArchSeqToOneTDist(nc::NetConstructor{T, F}, prior_μ::D, ν::T) where {T, F, D}
 
 Use a Student-T likelihood for a Seq-to-One architecture with a single output
 and known degress of freedom.

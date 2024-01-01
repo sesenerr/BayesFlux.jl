@@ -1,5 +1,8 @@
+#It is the main script for ML paper
+
 # Required Libraries
 include("BayesFlux.jl")
+include("ML_Backtest_Strategy.jl")
 using Random, Distributions, LinearAlgebra, Plots
 using MCMCChains, Bijectors, Statistics, Flux, StatsBase
 using .BayesFlux, ARCHModels 

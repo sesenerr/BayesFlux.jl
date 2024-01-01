@@ -266,17 +266,6 @@ println("B: ", B)
 qs = [quantile(yr, t_q) for yr in eachrow(posterior_yhat)]
 qs = reduce(hcat, qs)
 
-o_q
-
-
-nereden baslasam -flarsiz entellik-
-yan masa 
-huberman lab -work efficeny-xsw2
-
-
-
-
-
 
 ####### Assuming we have a function posterior_density(θ) that returns the posterior 
 #density p(θ|y) for a given value of θ, we can calculate 
